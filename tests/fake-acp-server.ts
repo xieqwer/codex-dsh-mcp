@@ -9,7 +9,7 @@
  * user's real DSH installation or session store.
  *
  * Env:
- *   FAKE_ACP_MODE            normal | no-list | no-resume | no-close | slow-prompt | crash-on-prompt | permission-request
+ *   FAKE_ACP_MODE            normal | no-list | no-resume | no-close | slow-prompt | crash-on-prompt | permission-request | defer-error
  *   FAKE_ACP_LOG_FILE        append every received/answered frame here (JSON lines)
  *   FAKE_ACP_SESSIONS_FILE   persisted session list shared across process restarts
  *   FAKE_ACP_PAGE_SIZE       session/list page size (default 2)
@@ -209,6 +209,15 @@ function handlePrompt(id: unknown, params: Json): void {
     if (mode === 'crash-on-prompt') {
       log({ kind: 'crash', sessionId });
       process.exit(3);
+    }
+    if (mode === 'defer-error') {
+      prompts.delete(sessionId);
+      respondError(
+        id,
+        -32603,
+        'Internal error: turn failed: tools: at least one tool must have defer_loading=false. All tools cannot be deferred. (request_id: fake-defer)',
+      );
+      return;
     }
     if (state.cancelled) {
       prompts.delete(sessionId);

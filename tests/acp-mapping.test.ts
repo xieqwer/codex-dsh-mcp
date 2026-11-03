@@ -430,3 +430,20 @@ test('a fresh ACP connection can resume a session that was active before a crash
     await scratch.shutdown();
   }
 });
+
+test('a stale tool history after resume is reported with actionable guidance', async () => {
+  process.env.FAKE_ACP_MODE = 'defer-error';
+  const scratch = new SessionBridge(makeConfig({ allowedCwds: [root] }), silentLogger);
+  try {
+    const created = parseToolText(await scratch.call('dsh_create_session', { cwd: root }));
+    const sent = parseToolText(
+      await scratch.call('dsh_send_message', { session_id: String(created.sessionId), text: 'go' }),
+    );
+    assert.equal(sent.ok, false);
+    assert.equal(sent.error?.code, 'DSH_SESSION_TOOL_HISTORY_STALE');
+    assert.match(String(sent.error?.message), /create a NEW session/u);
+  } finally {
+    delete process.env.FAKE_ACP_MODE;
+    await scratch.shutdown();
+  }
+});

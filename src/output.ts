@@ -38,7 +38,7 @@ export function normalizeAcpError(error: unknown): NormalizedError {
 }
 
 function mapServerMessage(message: string): { code: string; message: string } | undefined {
-  const rules: Array<{ pattern: RegExp; code: string }> = [
+  const rules: Array<{ pattern: RegExp; code: string; friendly?: string }> = [
     { pattern: /^unknown session:/i, code: 'DSH_SESSION_UNKNOWN' },
     { pattern: /^session is not resumable:/i, code: 'DSH_SESSION_NOT_RESUMABLE' },
     { pattern: /^session is already active:/i, code: 'DSH_SESSION_ACTIVE' },
@@ -46,9 +46,20 @@ function mapServerMessage(message: string): { code: string; message: string } | 
     { pattern: /must be an absolute path/i, code: 'DSH_INVALID_CWD' },
     { pattern: /^the ACP bridge has been disposed/i, code: 'DSH_ACP_UNAVAILABLE' },
     { pattern: /^connection closed/i, code: 'DSH_ACP_UNAVAILABLE' },
+    {
+      // DSH marks tools added mid-conversation as defer_loading; if a resumed
+      // session's whole tool set counts as "added", the model API rejects the
+      // turn. The session cannot continue in this state.
+      pattern: /defer_loading|All tools cannot be deferred/i,
+      code: 'DSH_SESSION_TOOL_HISTORY_STALE',
+      friendly:
+        'this session was resumed with a stale tool history: DSH marked every tool as deferred and the model API rejected the turn. ' +
+        'The session cannot continue in this state — create a NEW session with dsh_create_session instead. ' +
+        'dsh_close_session releases it while keeping the persisted history.',
+    },
   ];
   for (const rule of rules) {
-    if (rule.pattern.test(message)) return { code: rule.code, message };
+    if (rule.pattern.test(message)) return { code: rule.code, message: rule.friendly ?? message };
   }
   return undefined;
 }

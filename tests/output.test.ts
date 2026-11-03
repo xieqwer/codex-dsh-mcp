@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { TurnCollector } from '../src/output.ts';
+import { normalizeAcpError, TurnCollector } from '../src/output.ts';
+import { AcpError } from '../src/acp-client.ts';
 
 function messageChunk(text: string): unknown {
   return { sessionId: 's', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } } };
@@ -58,4 +59,17 @@ test('collector drops thoughts unless explicitly enabled', () => {
   const turn = withThoughts.collect();
   assert.equal(turn.thoughts, 'secre');
   assert.equal(turn.thoughtsTruncated, true);
+});
+
+test('defer_loading turn failure maps to a stale-tool-history error with guidance', () => {
+  const normalized = normalizeAcpError(
+    new AcpError({
+      code: -32603,
+      message:
+        'Internal error: turn failed: tools: at least one tool must have defer_loading=false. All tools cannot be deferred. (request_id: x)',
+    }),
+  );
+  assert.equal(normalized.code, 'DSH_SESSION_TOOL_HISTORY_STALE');
+  assert.match(normalized.message, /create a NEW session/u);
+  assert.match(normalized.message, /dsh_close_session/u);
 });

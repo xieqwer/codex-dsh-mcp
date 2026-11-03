@@ -147,6 +147,7 @@ node scripts/acceptance-real.ts --confirm-cost   # 真实 DSH_HOME；留下专�
 | ACP 崩溃后恢复报 `DSH_SESSION_ACTIVE` | 重连会清空旧会话状态；若仍出现，重启桥接后重新 list / resume |
 | `DSH_ACP_TIMEOUT` | 检查 DSH 状态；同时调整桥接超时和 Codex 工具超时 |
 | `spawn EPERM` | 检查宿主是否允许派生带管道的子进程，在允许的终端中运行 |
+| 恢复后发消息报 `DSH_SESSION_TOOL_HISTORY_STALE` | 该会话工具历史已过期（DSH 把全部工具标为延迟加载，模型拒绝该 turn）；新建会话继续，`dsh_close_session` 可释放它并保留历史 |
 
 ## 更新、卸载与贡献
 

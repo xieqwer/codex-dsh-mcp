@@ -1,0 +1,189 @@
+{
+  "startedAt": "2026-11-03T02:30:24.516Z",
+  "dshCommand": "<user-home>\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd",
+  "dshHome": "<repo>\\.tmp-tests\\real-home-khfA1v",
+  "workspace": "<repo>\\.tmp-tests\\real-work-yc4hWE",
+  "dshCommandExists": true,
+  "steps": [
+    {
+      "at": "2026-11-03T02:30:26.343Z",
+      "step": "initialize",
+      "detail": {
+        "protocolVersion": 1,
+        "agentInfo": {
+          "name": "deepseek-harness-acp",
+          "version": "0.0.1"
+        },
+        "agentCapabilities": {
+          "mcpCapabilities": {
+            "http": true
+          },
+          "promptCapabilities": {
+            "image": false,
+            "audio": false,
+            "embeddedContext": false
+          },
+          "sessionCapabilities": {
+            "close": {},
+            "list": {},
+            "resume": {}
+          }
+        },
+        "authMethods": []
+      }
+    },
+    {
+      "at": "2026-11-03T02:30:26.373Z",
+      "step": "session/new",
+      "detail": {
+        "sessionId": "<session-1>",
+        "configOptions": [
+          {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": "[\"deepseek-official\",\"deepseek-v4-flash\"]",
+            "options": [
+              {
+                "group": "deepseek-official",
+                "name": "DeepSeek",
+                "options": [
+                  {
+                    "value": "[\"deepseek-official\",\"deepseek-v4-flash\"]",
+                    "name": "deepseek-v4-flash"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "reasoning_effort",
+            "name": "Reasoning effort",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": "high",
+            "options": [
+              {
+                "value": "off",
+                "name": "Off",
+                "description": "Use for simple tasks that do not need reasoning."
+              },
+              {
+                "value": "low",
+                "name": "Low",
+                "description": "Prefer for routine or latency-sensitive tasks."
+              },
+              {
+                "value": "high",
+                "name": "High",
+                "description": "The default balance for most tasks."
+              },
+              {
+                "value": "max",
+                "name": "Max",
+                "description": "Reserve for the hardest quality-first tasks."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "at": "2026-11-03T02:30:26.404Z",
+      "step": "session/list (before close; the active session is excluded by design)",
+      "detail": {
+        "sessions": []
+      }
+    },
+    {
+      "at": "2026-11-03T02:30:26.435Z",
+      "step": "session/close",
+      "detail": {
+        "sessionId": "<session-1>"
+      }
+    },
+    {
+      "at": "2026-11-03T02:30:26.466Z",
+      "step": "session/list (after close)",
+      "detail": {
+        "sessions": [
+          {
+            "sessionId": "<session-1>",
+            "cwd": "<repo>\\.tmp-tests\\real-work-yc4hWE"
+          }
+        ]
+      }
+    },
+    {
+      "at": "2026-11-03T02:30:26.497Z",
+      "step": "session/resume",
+      "detail": {
+        "configOptions": [
+          {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": "[\"deepseek-official\",\"deepseek-v4-flash\"]",
+            "options": [
+              {
+                "group": "deepseek-official",
+                "name": "DeepSeek",
+                "options": [
+                  {
+                    "value": "[\"deepseek-official\",\"deepseek-v4-flash\"]",
+                    "name": "deepseek-v4-flash"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "reasoning_effort",
+            "name": "Reasoning effort",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": "high",
+            "options": [
+              {
+                "value": "off",
+                "name": "Off",
+                "description": "Use for simple tasks that do not need reasoning."
+              },
+              {
+                "value": "low",
+                "name": "Low",
+                "description": "Prefer for routine or latency-sensitive tasks."
+              },
+              {
+                "value": "high",
+                "name": "High",
+                "description": "The default balance for most tasks."
+              },
+              {
+                "value": "max",
+                "name": "Max",
+                "description": "Reserve for the hardest quality-first tasks."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "at": "2026-11-03T02:30:26.529Z",
+      "step": "session/close (after resume)",
+      "detail": {
+        "sessionId": "<session-1>"
+      }
+    }
+  ],
+  "ok": true,
+  "processExit": {
+    "code": 0,
+    "signal": null,
+    "expected": true
+  },
+  "finishedAt": "2026-11-03T02:30:26.590Z"
+}

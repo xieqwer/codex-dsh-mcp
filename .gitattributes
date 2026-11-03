@@ -1,0 +1,9 @@
+# Normalize line endings so CI and Windows checkouts agree.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.zst binary
+*.zstd binary

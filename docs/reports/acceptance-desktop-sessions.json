@@ -1,0 +1,112 @@
+{
+  "startedAt": "2026-11-03T04:40:20.199Z",
+  "mode": "real desktop-created inactive sessions: list -> resume -> send_message (no close)",
+  "dshHome": "<user-home>\\.dsh",
+  "targets": [
+    {
+      "kind": "execution",
+      "sessionId": "<session-1>",
+      "cwd": "<project-a>"
+    },
+    {
+      "kind": "decision",
+      "sessionId": "<session-2>",
+      "cwd": "<project-b>"
+    }
+  ],
+  "results": [
+    {
+      "kind": "execution",
+      "sessionId": "<session-1>",
+      "cwd": "<project-a>",
+      "persistedFileMtime": "2026-11-03T04:40:14.756Z",
+      "resume": {
+        "ok": true,
+        "note": "Resume only restores a persisted inactive session and continues it; it does not replay prior transcript messages.",
+        "error": null
+      },
+      "send": {
+        "ok": true,
+        "stop_reason": "end_turn",
+        "assistant_text": "EXEC-OK",
+        "assistant_text_truncated": false,
+        "tool_calls": [],
+        "usage": null,
+        "permission_events": [],
+        "wall_ms": 774,
+        "error": null
+      }
+    },
+    {
+      "kind": "decision",
+      "sessionId": "<session-2>",
+      "cwd": "<project-b>",
+      "persistedFileMtime": "2026-10-05T07:41:59.441Z",
+      "resume": {
+        "ok": true,
+        "note": "Resume only restores a persisted inactive session and continues it; it does not replay prior transcript messages.",
+        "error": null
+      },
+      "send": {
+        "ok": true,
+        "stop_reason": "end_turn",
+        "assistant_text": "DECIDE-OK",
+        "assistant_text_truncated": false,
+        "tool_calls": [],
+        "usage": null,
+        "permission_events": [],
+        "wall_ms": 1706,
+        "error": null
+      }
+    }
+  ],
+  "steps": [
+    {
+      "at": "2026-11-03T04:40:22.226Z",
+      "step": "1. dsh_list_sessions",
+      "detail": {
+        "count": 73,
+        "hasBothTargets": true
+      }
+    },
+    {
+      "at": "2026-11-03T04:40:22.503Z",
+      "step": "2. resume (execution)",
+      "detail": {
+        "ok": true,
+        "note": "Resume only restores a persisted inactive session and continues it; it does not replay prior transcript messages.",
+        "error": null
+      }
+    },
+    {
+      "at": "2026-11-03T04:40:23.277Z",
+      "step": "3. send_message (execution)",
+      "detail": {
+        "reply": "EXEC-OK",
+        "stop_reason": "end_turn",
+        "wall_ms": 774
+      }
+    },
+    {
+      "at": "2026-11-03T04:40:23.403Z",
+      "step": "2. resume (decision)",
+      "detail": {
+        "ok": true,
+        "note": "Resume only restores a persisted inactive session and continues it; it does not replay prior transcript messages.",
+        "error": null
+      }
+    },
+    {
+      "at": "2026-11-03T04:40:25.109Z",
+      "step": "3. send_message (decision)",
+      "detail": {
+        "reply": "DECIDE-OK",
+        "stop_reason": "end_turn",
+        "wall_ms": 1706
+      }
+    }
+  ],
+  "ok": true,
+  "finishedAt": "2026-11-03T04:40:25.209Z",
+  "note": "dsh_close_session was NOT called; sessions remain persisted. Connection teardown only released the run scope."
+}

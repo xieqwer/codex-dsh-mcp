@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: node ${{ matrix.node }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Show versions
+        run: |
+          node --version
+          npm --version
+
+      - name: Privacy guard (tracked files, BOM/UTF-16 aware)
+        run: npm run check:privacy
+
+      - name: Build (type stripping, no dependencies)
+        run: npm run build
+
+      - name: Test (fake ACP peer only — never touches a real DSH install)
+        run: npm test

@@ -1,0 +1,232 @@
+{
+  "startedAt": "2026-11-03T02:36:56.057Z",
+  "bridgeEntry": "<repo>\\dist\\index.js",
+  "dshLauncher": "<user-home>\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd",
+  "dshHome": "<repo>\\.tmp-tests\\e2e-home-zQms6q",
+  "workspace": "<repo>\\.tmp-tests\\e2e-work-wnI8MP",
+  "steps": [
+    {
+      "at": "2026-11-03T02:36:56.162Z",
+      "step": "mcp initialize",
+      "detail": "2025-06-18"
+    },
+    {
+      "at": "2026-11-03T02:36:57.751Z",
+      "step": "tools/list",
+      "detail": [
+        "dsh_list_sessions",
+        "dsh_create_session",
+        "dsh_resume_session",
+        "dsh_send_message",
+        "dsh_cancel_session",
+        "dsh_close_session"
+      ]
+    },
+    {
+      "at": "2026-11-03T02:36:57.778Z",
+      "step": "dsh_create_session",
+      "detail": {
+        "ok": true,
+        "source": "session/new",
+        "sessionId": "<session-1>",
+        "cwd": "<repo>\\.tmp-tests\\e2e-work-wnI8MP",
+        "model": null,
+        "reasoning_effort": null,
+        "configOptions": [
+          {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": "[\"deepseek-official\",\"deepseek-v4-flash\"]",
+            "options": [
+              {
+                "group": "deepseek-official",
+                "name": "DeepSeek",
+                "options": [
+                  {
+                    "value": "[\"deepseek-official\",\"deepseek-v4-flash\"]",
+                    "name": "deepseek-v4-flash"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "reasoning_effort",
+            "name": "Reasoning effort",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": "high",
+            "options": [
+              {
+                "value": "off",
+                "name": "Off",
+                "description": "Use for simple tasks that do not need reasoning."
+              },
+              {
+                "value": "low",
+                "name": "Low",
+                "description": "Prefer for routine or latency-sensitive tasks."
+              },
+              {
+                "value": "high",
+                "name": "High",
+                "description": "The default balance for most tasks."
+              },
+              {
+                "value": "max",
+                "name": "Max",
+                "description": "Reserve for the hardest quality-first tasks."
+              }
+            ]
+          }
+        ],
+        "next": "call dsh_send_message with this explicit session_id"
+      }
+    },
+    {
+      "at": "2026-11-03T02:36:57.814Z",
+      "step": "dsh_list_sessions while active (session excluded by ACP design)",
+      "detail": {
+        "ok": true,
+        "source": "session/list",
+        "sessions": [],
+        "count": 0,
+        "nextCursor": null,
+        "hasMore": false,
+        "pageSizeHint": "the DSH profile caps each ACP page (sessionListPageSize, default 100)"
+      }
+    },
+    {
+      "at": "2026-11-03T02:36:57.845Z",
+      "step": "dsh_close_session",
+      "detail": {
+        "ok": true,
+        "source": "session/close",
+        "session_id": "<session-1>",
+        "closed": true,
+        "persisted_history_retained": true,
+        "note": "the session scope was released; it can be resumed later with dsh_resume_session"
+      }
+    },
+    {
+      "at": "2026-11-03T02:36:57.876Z",
+      "step": "dsh_list_sessions after close",
+      "detail": {
+        "ok": true,
+        "source": "session/list",
+        "sessions": [
+          {
+            "sessionId": "<session-1>",
+            "cwd": "<repo>\\.tmp-tests\\e2e-work-wnI8MP"
+          }
+        ],
+        "count": 1,
+        "nextCursor": null,
+        "hasMore": false,
+        "pageSizeHint": "the DSH profile caps each ACP page (sessionListPageSize, default 100)"
+      }
+    },
+    {
+      "at": "2026-11-03T02:36:57.944Z",
+      "step": "bridge process 1 exited",
+      "detail": {
+        "sessionId": "<session-1>"
+      }
+    },
+    {
+      "at": "2026-11-03T02:36:59.621Z",
+      "step": "bridge 2 dsh_list_sessions",
+      "detail": {
+        "ok": true,
+        "source": "session/list",
+        "sessions": [
+          {
+            "sessionId": "<session-1>",
+            "cwd": "<repo>\\.tmp-tests\\e2e-work-wnI8MP"
+          }
+        ],
+        "count": 1,
+        "nextCursor": null,
+        "hasMore": false,
+        "pageSizeHint": "the DSH profile caps each ACP page (sessionListPageSize, default 100)"
+      }
+    },
+    {
+      "at": "2026-11-03T02:36:59.650Z",
+      "step": "bridge 2 dsh_resume_session",
+      "detail": {
+        "ok": true,
+        "source": "session/resume",
+        "sessionId": "<session-1>",
+        "cwd": "<repo>\\.tmp-tests\\e2e-work-wnI8MP",
+        "configOptions": [
+          {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": "[\"deepseek-official\",\"deepseek-v4-flash\"]",
+            "options": [
+              {
+                "group": "deepseek-official",
+                "name": "DeepSeek",
+                "options": [
+                  {
+                    "value": "[\"deepseek-official\",\"deepseek-v4-flash\"]",
+                    "name": "deepseek-v4-flash"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "reasoning_effort",
+            "name": "Reasoning effort",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": "high",
+            "options": [
+              {
+                "value": "off",
+                "name": "Off",
+                "description": "Use for simple tasks that do not need reasoning."
+              },
+              {
+                "value": "low",
+                "name": "Low",
+                "description": "Prefer for routine or latency-sensitive tasks."
+              },
+              {
+                "value": "high",
+                "name": "High",
+                "description": "The default balance for most tasks."
+              },
+              {
+                "value": "max",
+                "name": "Max",
+                "description": "Reserve for the hardest quality-first tasks."
+              }
+            ]
+          }
+        ],
+        "note": "Resume only restores a persisted inactive session and continues it; it does not replay prior transcript messages."
+      }
+    },
+    {
+      "at": "2026-11-03T02:36:59.684Z",
+      "step": "bridge 2 dsh_close_session",
+      "detail": {
+        "ok": true,
+        "source": "session/close",
+        "session_id": "<session-1>",
+        "closed": true,
+        "persisted_history_retained": true,
+        "note": "the session scope was released; it can be resumed later with dsh_resume_session"
+      }
+    }
+  ],
+  "ok": true,
+  "finishedAt": "2026-11-03T02:36:59.765Z"
+}

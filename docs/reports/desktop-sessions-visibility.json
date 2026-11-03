@@ -1,0 +1,130 @@
+{
+  "startedAt": "2026-11-03T02:45:47.842Z",
+  "dshHome": "<user-home>",
+  "sessionsDir": "<user-home>",
+  "readOnly": true,
+  "steps": [
+    {
+      "at": "2026-11-03T02:45:47.855Z",
+      "step": "local persisted session ids (directory-entry names only)",
+      "detail": {
+        "count": 219,
+        "filesScanned": 232,
+        "sample": [
+          "<session-1>",
+          "<session-2>",
+          "<session-3>",
+          "<session-4>",
+          "<session-5>"
+        ]
+      }
+    },
+    {
+      "at": "2026-11-03T02:45:49.843Z",
+      "step": "ACP session/list visible sessions",
+      "detail": {
+        "count": 71,
+        "sample": [
+          {
+            "sessionId": "<session-6>",
+            "cwd": "<workspace>"
+          },
+          {
+            "sessionId": "<session-7>",
+            "cwd": "<workspace>"
+          },
+          {
+            "sessionId": "<session-8>",
+            "cwd": "<workspace>"
+          },
+          {
+            "sessionId": "<session-9>",
+            "cwd": "<project-a>"
+          },
+          {
+            "sessionId": "<session-10>",
+            "cwd": "<project-a>"
+          }
+        ]
+      }
+    },
+    {
+      "at": "2026-11-03T02:45:49.843Z",
+      "step": "overlap",
+      "detail": {
+        "acpVisibleCount": 71,
+        "localPersistedCount": 219,
+        "overlapCount": 71,
+        "notListedCount": 148,
+        "visibleOnlyCount": 0,
+        "cwdDistribution": {
+          "<project-a>": 31,
+          "<workspace>": 11,
+          "<steam-game>": 8,
+          "<project-c>": 4,
+          "<desktop-doc-a>": 4,
+          "<project-c>/<subdir>": 3,
+          "<desktop-doc-b>": 3,
+          "<personal-tool>": 2,
+          "<project-b>": 2,
+          "<project-e>": 2,
+          "<steam-game-mod>": 1
+        },
+        "overlapSample": [
+          "<session-1>",
+          "<session-2>",
+          "<session-3>",
+          "<session-4>",
+          "<session-5>"
+        ],
+        "notListedSample": [
+          "<session-11>",
+          "<session-12>",
+          "<session-13>",
+          "<session-14>",
+          "<session-15>"
+        ],
+        "activeElsewhereListed": true,
+        "currentSessionId": "<session-6>"
+      }
+    }
+  ],
+  "result": {
+    "acpVisibleCount": 71,
+    "localPersistedCount": 219,
+    "overlapCount": 71,
+    "notListedCount": 148,
+    "visibleOnlyCount": 0,
+    "cwdDistribution": {
+      "<project-a>": 31,
+      "<workspace>": 11,
+      "<steam-game>": 8,
+      "<project-c>": 4,
+      "<desktop-doc-a>": 4,
+      "<project-c>/<subdir>": 3,
+      "<desktop-doc-b>": 3,
+      "<personal-tool>": 2,
+      "<project-b>": 2,
+      "<project-e>": 2,
+      "<steam-game-mod>": 1
+    },
+    "overlapSample": [
+      "<session-1>",
+      "<session-2>",
+      "<session-3>",
+      "<session-4>",
+      "<session-5>"
+    ],
+    "notListedSample": [
+      "<session-11>",
+      "<session-12>",
+      "<session-13>",
+      "<session-14>",
+      "<session-15>"
+    ],
+    "activeElsewhereListed": true,
+    "currentSessionId": "<session-6>"
+  },
+  "ok": true,
+  "finishedAt": "2026-11-03T02:45:49.960Z"
+}

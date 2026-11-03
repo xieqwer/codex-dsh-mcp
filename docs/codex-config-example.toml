@@ -1,0 +1,60 @@
+# Codex MCP 配置样例：让 Codex 通过本机 stdio 桥接控制 DeepSeek Harness
+#
+# 放置位置：~/.codex/config.toml（Windows：C:\Users\<user>\.codex\config.toml）
+# 合并方式：把下面两个表追加到文件末尾；已存在 [mcp_servers.*] 时不要重复表头。
+#
+# Windows 路径务必使用 TOML 单引号字面量 'D:\...'：
+#   双引号里 \U、\t、\n 会被当作转义序列，路径会被静默改坏。
+
+[mcp_servers.dsh]
+# 必须是真正的 node 可执行文件（用 `where node` 查），要求 Node >= 22.18。
+# 注意：DSH 桌面自带的 resources/runtime/bin/node.cmd 只是依赖 DSH_DESKTOP_NODE_EXECUTABLE
+# 的包装脚本，不能直接作为 MCP command。
+command = 'C:\Program Files\nodejs\node.exe'
+# 桥接入口：本项目构建产物。必须使用绝对路径。
+args = ['D:\path\to\codex-dsh-mcp\dist\index.js']
+# 桥接进程的工作目录。若 DSH_CODEX_ALLOWED_CWDS 未设置，默认允许目录就是这个 cwd。
+cwd = 'D:\path\to\your\project'
+# 桥接自身启动很快，但首次会引导 DSH acp profile（可能几秒到几十秒），且 tools/list 会等最多 5s。
+startup_timeout_sec = 120
+# 一次 session/prompt 可能跑几分钟；按你的任务规模调大。
+tool_timeout_sec = 900
+
+[mcp_servers.dsh.env]
+# 允许被操纵的 DSH 会话工作目录（分号分隔多个）。必须写真实绝对路径。
+DSH_CODEX_ALLOWED_CWDS = 'D:\path\to\your\project'
+
+# 若要显式选择模型，配置允许列表；不配置则不允许传 model 参数。
+# DSH 公布的 model 显示名示例：deepseek-v4-flash、deepseek-v4-pro
+# DSH_CODEX_ALLOWED_MODELS = 'deepseek-v4-flash;deepseek-v4-pro'
+# DSH_CODEX_ALLOWED_REASONING_EFFORTS = 'off;low;high;max'
+
+# 诊断日志（Codex 不会转发 stdio server 的 stderr，出问题时最有用）。
+DSH_CODEX_LOG_FILE = 'D:\path\to\codex-dsh-mcp\.codex-dsh-mcp.log'
+DSH_CODEX_LOG_LEVEL = 'info'
+
+# 可选：指向明确的 DSH 启动器。不设置时桥接自动探测安装目录的 dsh.cmd。
+# ⚠️ PATH 上的 dsh 可能是旧的 npm 全局版本（本机实测 0.1.5-rc.1），不要用它。
+# DSH_CODEX_DSH_COMMAND = 'C:\Users\<user>\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd'
+
+# 可选：超时微调（毫秒）。
+# DSH_CODEX_CONNECT_TIMEOUT_MS = '120000'
+# DSH_CODEX_CALL_TIMEOUT_MS = '120000'
+# DSH_CODEX_PROMPT_TIMEOUT_MS = '600000'
+# DSH_CODEX_MAX_OUTPUT_CHARS = '20000'
+
+# 可选：用临时 DSH_HOME 隔离（默认继承 DSH_HOME 或 ~/.dsh）。
+# DSH_CODEX_DSH_HOME = 'D:\tmp\dsh-codex-home'
+
+# ---------------------------------------------------------------------------
+# 验证步骤
+# ---------------------------------------------------------------------------
+# 1) codex mcp list            # 只证明配置被读到，不建立连接
+# 2) codex mcp get dsh --json  # 确认字段真的被解析、Windows 路径没被转义坏
+# 3) 在 Codex 里发起一次会话，然后看 DSH_CODEX_LOG_FILE：
+#      "mcp server ready" / "connected to dsh acp" 出现即握手成功
+# 4) 不接入 Codex 也能自检（不消耗模型 token）：
+#      node scripts/real-e2e-probe.ts
+#
+# 注意：桥接不会读取或写入任何密钥；这里不需要 API key。DSH 自己使用它自己的
+# 凭据（~/.dsh/.credentials.yaml），桥接不碰。

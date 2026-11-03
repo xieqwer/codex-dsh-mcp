@@ -1,0 +1,293 @@
+{
+  "startedAt": "2026-11-03T04:27:15.755Z",
+  "mode": "real model prompt acceptance (dedicated sessions only)",
+  "dshHome": "<user-home>\\.dsh",
+  "workspace": "<repo>\\.tmp-tests\\acceptance-work-QpB8Pb",
+  "prompts": [
+    "Reply with the single word: PONG",
+    "Reply with the single word: RESUMED"
+  ],
+  "steps": [
+    {
+      "at": "2026-11-03T04:27:17.790Z",
+      "step": "phase1 dsh_create_session",
+      "detail": {
+        "ok": true,
+        "source": "session/new",
+        "sessionId": "<session-1>",
+        "cwd": "<repo>\\.tmp-tests\\acceptance-work-QpB8Pb",
+        "model": null,
+        "reasoning_effort": null,
+        "configOptions": [
+          {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": "[\"deepseek-official\",\"deepseek-v4-flash\"]",
+            "options": [
+              {
+                "group": "deepseek-official",
+                "name": "DeepSeek",
+                "options": [
+                  {
+                    "value": "[\"deepseek-official\",\"deepseek-v4-flash\"]",
+                    "name": "deepseek-v4-flash"
+                  },
+                  {
+                    "value": "[\"deepseek-official\",\"deepseek-flash\"]",
+                    "name": "DeepSeek-V4.1-Flash"
+                  },
+                  {
+                    "value": "[\"deepseek-official\",\"deepseek-v4-pro\"]",
+                    "name": "DeepSeek-V4-Pro",
+                    "description": "Stronger agentic coding, knowledge, and difficult reasoning; suited to complex or quality-critical tasks at higher cost."
+                  }
+                ]
+              },
+              {
+                "group": "deepseek-account",
+                "name": "DeepSeek Account",
+                "options": [
+                  {
+                    "value": "[\"deepseek-account\",\"deepseek-flash\"]",
+                    "name": "DeepSeek-V4.1-Flash"
+                  },
+                  {
+                    "value": "[\"deepseek-account\",\"deepseek-v4-pro\"]",
+                    "name": "DeepSeek-V4-Pro",
+                    "description": "Stronger agentic coding, knowledge, and difficult reasoning; suited to complex or quality-critical tasks at higher cost."
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "reasoning_effort",
+            "name": "Reasoning effort",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": "high",
+            "options": [
+              {
+                "value": "off",
+                "name": "Off",
+                "description": "Use for simple tasks that do not need reasoning."
+              },
+              {
+                "value": "low",
+                "name": "Low",
+                "description": "Prefer for routine or latency-sensitive tasks."
+              },
+              {
+                "value": "high",
+                "name": "High",
+                "description": "The default balance for most tasks."
+              },
+              {
+                "value": "max",
+                "name": "Max",
+                "description": "Reserve for the hardest quality-first tasks."
+              }
+            ]
+          }
+        ],
+        "next": "call dsh_send_message with this explicit session_id"
+      }
+    },
+    {
+      "at": "2026-11-03T04:27:18.998Z",
+      "step": "phase1 dsh_send_message (real model)",
+      "detail": {
+        "ok": true,
+        "source": "session/prompt",
+        "session_id": "<session-1>",
+        "cwd": "<repo>\\.tmp-tests\\acceptance-work-QpB8Pb",
+        "stop_reason": "end_turn",
+        "assistant_text": "PONG",
+        "assistant_text_truncated": false,
+        "assistant_text_original_chars": 4,
+        "thoughts": null,
+        "thoughts_truncated": false,
+        "thoughts_included": false,
+        "tool_calls": [],
+        "usage": null,
+        "permission_policy": "deny",
+        "permission_events": [],
+        "unknown_update_kinds": [],
+        "wall_ms": 1207
+      }
+    },
+    {
+      "at": "2026-11-03T04:27:19.028Z",
+      "step": "phase1 dsh_close_session (real release)",
+      "detail": {
+        "ok": true,
+        "source": "session/close",
+        "session_id": "<session-1>",
+        "closed": true,
+        "persisted_history_retained": true,
+        "note": "the session scope was released; it can be resumed later with dsh_resume_session"
+      }
+    },
+    {
+      "at": "2026-11-03T04:27:19.125Z",
+      "step": "phase1 bridge exited",
+      "detail": {
+        "sessionId": "<session-1>"
+      }
+    },
+    {
+      "at": "2026-11-03T04:27:21.217Z",
+      "step": "phase2 dsh_list_sessions",
+      "detail": {
+        "ok": true,
+        "count": 1,
+        "sessions": [
+          {
+            "sessionId": "<session-1>",
+            "cwd": "<repo>\\.tmp-tests\\acceptance-work-QpB8Pb"
+          }
+        ]
+      }
+    },
+    {
+      "at": "2026-11-03T04:27:21.710Z",
+      "step": "phase2 dsh_resume_session",
+      "detail": {
+        "ok": true,
+        "source": "session/resume",
+        "sessionId": "<session-1>",
+        "cwd": "<repo>\\.tmp-tests\\acceptance-work-QpB8Pb",
+        "configOptions": [
+          {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": "[\"deepseek-official\",\"deepseek-v4-flash\"]",
+            "options": [
+              {
+                "group": "deepseek-official",
+                "name": "DeepSeek",
+                "options": [
+                  {
+                    "value": "[\"deepseek-official\",\"deepseek-v4-flash\"]",
+                    "name": "deepseek-v4-flash"
+                  },
+                  {
+                    "value": "[\"deepseek-official\",\"deepseek-flash\"]",
+                    "name": "DeepSeek-V4.1-Flash"
+                  },
+                  {
+                    "value": "[\"deepseek-official\",\"deepseek-v4-pro\"]",
+                    "name": "DeepSeek-V4-Pro",
+                    "description": "Stronger agentic coding, knowledge, and difficult reasoning; suited to complex or quality-critical tasks at higher cost."
+                  }
+                ]
+              },
+              {
+                "group": "deepseek-account",
+                "name": "DeepSeek Account",
+                "options": [
+                  {
+                    "value": "[\"deepseek-account\",\"deepseek-flash\"]",
+                    "name": "DeepSeek-V4.1-Flash"
+                  },
+                  {
+                    "value": "[\"deepseek-account\",\"deepseek-v4-pro\"]",
+                    "name": "DeepSeek-V4-Pro",
+                    "description": "Stronger agentic coding, knowledge, and difficult reasoning; suited to complex or quality-critical tasks at higher cost."
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "reasoning_effort",
+            "name": "Reasoning effort",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": "high",
+            "options": [
+              {
+                "value": "off",
+                "name": "Off",
+                "description": "Use for simple tasks that do not need reasoning."
+              },
+              {
+                "value": "low",
+                "name": "Low",
+                "description": "Prefer for routine or latency-sensitive tasks."
+              },
+              {
+                "value": "high",
+                "name": "High",
+                "description": "The default balance for most tasks."
+              },
+              {
+                "value": "max",
+                "name": "Max",
+                "description": "Reserve for the hardest quality-first tasks."
+              }
+            ]
+          }
+        ],
+        "note": "Resume only restores a persisted inactive session and continues it; it does not replay prior transcript messages."
+      }
+    },
+    {
+      "at": "2026-11-03T04:27:22.517Z",
+      "step": "phase2 dsh_send_message after resume (real model)",
+      "detail": {
+        "ok": true,
+        "source": "session/prompt",
+        "session_id": "<session-1>",
+        "cwd": "<repo>\\.tmp-tests\\acceptance-work-QpB8Pb",
+        "stop_reason": "end_turn",
+        "assistant_text": "RESUMED",
+        "assistant_text_truncated": false,
+        "assistant_text_original_chars": 7,
+        "thoughts": null,
+        "thoughts_truncated": false,
+        "thoughts_included": false,
+        "tool_calls": [],
+        "usage": null,
+        "permission_policy": "deny",
+        "permission_events": [],
+        "unknown_update_kinds": [],
+        "wall_ms": 807
+      }
+    },
+    {
+      "at": "2026-11-03T04:27:22.548Z",
+      "step": "phase2 dsh_close_session",
+      "detail": {
+        "ok": true,
+        "source": "session/close",
+        "session_id": "<session-1>",
+        "closed": true,
+        "persisted_history_retained": true,
+        "note": "the session scope was released; it can be resumed later with dsh_resume_session"
+      }
+    }
+  ],
+  "phase1": {
+    "sessionId": "<session-1>",
+    "prompt": "Reply with the single word: PONG",
+    "stop_reason": "end_turn",
+    "assistant_text": "PONG",
+    "usage": null,
+    "thoughts_included": false,
+    "permission_events": []
+  },
+  "phase2": {
+    "sessionId": "<session-1>",
+    "prompt": "Reply with the single word: RESUMED",
+    "stop_reason": "end_turn",
+    "assistant_text": "RESUMED",
+    "usage": null
+  },
+  "ok": true,
+  "finishedAt": "2026-11-03T04:27:22.616Z"
+}

@@ -197,6 +197,25 @@ function isInside(parent: string, child: string): boolean {
   return rel !== '..' && !rel.startsWith(`..${sep}`);
 }
 
+/**
+ * True when a session's reported cwd lives inside the configured allowlist.
+ *
+ * Used to filter `session/list` results when the caller did not pass a cwd:
+ * without it, an unfiltered list would expose session ids and paths from every
+ * directory DSH knows about, bypassing the directory allowlist.
+ */
+export function isWithinAllowedCwds(rawCwd: unknown, allowed: readonly string[]): boolean {
+  if (typeof rawCwd !== 'string' || rawCwd.trim() === '' || !isAbsolute(rawCwd)) return false;
+  let canonical: string;
+  try {
+    canonical = realpathSync.native(rawCwd);
+  } catch {
+    // The session directory may have been deleted; fall back to the lexical path.
+    canonical = resolve(rawCwd);
+  }
+  return allowed.some((root) => isInside(root, canonical));
+}
+
 export interface CwdDecision {
   ok: boolean;
   /** Canonical absolute path when ok. */

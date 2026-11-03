@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
@@ -42,6 +44,14 @@ class Harness {
     this.input.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
   }
 
+  sendToolCall(name: string, args: Record<string, unknown>): number {
+    const id = this.#nextId++;
+    this.input.write(
+      `${JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } })}\n`,
+    );
+    return id;
+  }
+
   async request(method: string, params: Record<string, unknown> = {}): Promise<AnyFrame> {
     const id = this.#nextId++;
     this.input.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
@@ -61,6 +71,8 @@ let bridge: SessionBridge;
 
 before(() => {
   root = makeTempDir('mcp');
+  process.env.FAKE_ACP_LOG_FILE = join(root, 'acp-frames.jsonl');
+  process.env.FAKE_ACP_SESSIONS_FILE = join(root, 'sessions.json');
   delete process.env.FAKE_ACP_MODE;
   bridge = new SessionBridge(makeConfig({ allowedCwds: [root] }), silentLogger);
 });
@@ -211,4 +223,49 @@ test('notification frames never carry an id and stdout is frame-only', async () 
 test('shutdown on stdin EOF releases the ACP child and refuses further connections', async () => {
   await bridge.shutdown();
   await assert.rejects(() => bridge.ensureConnected(), /shutting down/u);
+});
+
+function readAcpLog(): Array<{ kind?: string; frame?: { method?: string }; sessionId?: string }> {
+  const file = process.env.FAKE_ACP_LOG_FILE;
+  if (file === undefined || !existsSync(file)) return [];
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => JSON.parse(line) as { kind?: string; frame?: { method?: string }; sessionId?: string });
+}
+
+test('MCP request cancellation is forwarded to the ACP session', async () => {
+  process.env.FAKE_ACP_MODE = 'slow-prompt';
+  process.env.FAKE_ACP_PROMPT_DELAY_MS = '2500';
+  const scratch = new SessionBridge(
+    makeConfig({ allowedCwds: [root], promptTimeoutMs: 10_000 }),
+    silentLogger,
+  );
+  try {
+    const created = parseToolText(await scratch.call('dsh_create_session', { cwd: root }));
+    const sessionId = String(created.sessionId);
+    const harness = new Harness(scratch);
+    try {
+      await harness.request('initialize', { protocolVersion: '2025-06-18' });
+      harness.notify('notifications/initialized');
+      const requestId = harness.sendToolCall('dsh_send_message', { session_id: sessionId, text: 'slow' });
+      await waitFor(
+        () => readAcpLog().some((entry) => entry.kind === 'recv' && entry.frame?.method === 'session/prompt'),
+        5_000,
+        'session/prompt frame',
+      );
+      harness.notify('notifications/cancelled', { requestId, reason: 'user cancelled' });
+      await waitFor(
+        () => readAcpLog().some((entry) => entry.kind === 'session/cancel'),
+        5_000,
+        'forwarded session/cancel',
+      );
+    } finally {
+      await harness.close();
+    }
+  } finally {
+    delete process.env.FAKE_ACP_MODE;
+    delete process.env.FAKE_ACP_PROMPT_DELAY_MS;
+    await scratch.shutdown();
+  }
 });

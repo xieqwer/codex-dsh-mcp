@@ -11,7 +11,8 @@ small set of MCP tools onto standard ACP methods. It does **not** register tools
 inside DSH, does not act as a generic ACP proxy, and never reads DSH storage
 (databases, JSONL, `.zstd`) directly.
 
-Chinese documentation (more detailed): [README.md](README.md)
+Chinese documentation: [README.md](README.md). Full [configuration reference](docs/configuration.md)
+and [audit findings](docs/reports/05-readme-audit.md) are available in Chinese.
 
 ## In three lines
 
@@ -25,7 +26,7 @@ Chinese documentation (more detailed): [README.md](README.md)
 
 | Area | State |
 |---|---|
-| MCP ↔ ACP bridge, isolation, error semantics | Verified — 45 tests against a fake ACP peer |
+| MCP ↔ ACP bridge, isolation, error semantics | Verified — 54 tests against a fake ACP peer |
 | Codex live call (`create` / `send` / `close`, `list`) | Verified with Codex 0.166.0 |
 | Real model prompt + resume-after-release | Verified on dedicated throw-away sessions |
 | Real desktop sessions (`list → resume → continue`) | Verified on sessions inactive for 20+ days |
@@ -45,10 +46,10 @@ and `.cmd` handling were only exercised on Windows.
 
 ```bash
 npm run build        # writes dist/*.js, no dependencies, no network
-npm test             # 45 tests, fake ACP peer, no model calls, no real sessions
+npm test             # 54 tests, fake ACP peer, no model calls, no real sessions
 ```
 
-Optional probes (no model call; use a throw-away `DSH_HOME`):
+Optional probes (no model call; the first two use a throw-away `DSH_HOME`):
 
 ```bash
 node scripts/real-acp-probe.ts
@@ -91,20 +92,30 @@ Use TOML single-quoted literals for Windows paths (`'D:\...'`), otherwise
 | `dsh_list_sessions` | `session/list` | Paginated; sessions held by another process are also listed |
 | `dsh_create_session` | `session/new` | `cwd` must be absolute and allowlisted |
 | `dsh_resume_session` | `session/resume` | Requires `acknowledge_released=true`; does not replay history |
-| `dsh_send_message` | `session/prompt` | One prompt in flight per session; permissions denied by default |
+| `dsh_send_message` | `session/prompt` | One prompt in flight per session; defaults to deny unless an allow policy was set on resume |
 | `dsh_cancel_session` | `session/cancel` | Targets exactly one session |
 | `dsh_close_session` | `session/close` | Capability-gated; requires `confirm=true` |
 
 DSH internal thoughts (`agent_thought_chunk`) are **not returned** unless
 `DSH_CODEX_INCLUDE_THOUGHTS=1`.
 
+A `permission_policy` is **not inherited** across messages: it applies to the
+`dsh_send_message` call that carries it (resume-time values are validated only).
+MCP request cancellation (`notifications/cancelled`) is forwarded to the matching
+ACP session as `session/cancel`; DSH decides cooperatively whether to stop.
+The output limit is enforced while collecting: assistant/thought text stops
+growing and oversized tool `rawInput`/`rawOutput` become previews.
+
 ## Security
 
 - stdout carries protocol frames only; diagnostics go to stderr / optional log.
 - No TCP/HTTP listener; local stdio only.
-- `cwd` allowlist + `realpath` (rejects symlink/junction escapes).
+- `cwd` allowlist + `realpath` (rejects symlink/junction escapes); this is not
+  an execution sandbox, and an unfiltered list can expose other session summaries.
 - Explicit `session_id` required; never defaults to "most recent session".
-- Permission requests denied by default; no auto-approval.
+- Permission requests denied by default, subject to the resume policy above.
+- Child processes inherit the host environment and permissions. Logs forward
+  DSH stderr and should be checked for sensitive data before sharing.
 - See [SECURITY.md](SECURITY.md).
 
 ## Non-goals

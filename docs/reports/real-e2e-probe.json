@@ -1,7 +1,7 @@
 {
   "startedAt": "2026-11-03T02:36:56.057Z",
   "bridgeEntry": "<repo>\\dist\\index.js",
-  "dshLauncher": "<user-home>\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd",
+  "dshLauncher": "<user-home>\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd",
   "dshHome": "<repo>\\.tmp-tests\\e2e-home-zQms6q",
   "workspace": "<repo>\\.tmp-tests\\e2e-work-wnI8MP",
   "steps": [

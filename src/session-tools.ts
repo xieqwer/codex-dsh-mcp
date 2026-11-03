@@ -15,10 +15,11 @@ import {
 import { AcpProcess, type Logger } from './acp-process.ts';
 import {
   type BridgeConfig,
+  isWithinAllowedCwds,
   validateCwd,
   validateSelection,
 } from './config.ts';
-import { TurnCollector, normalizeAcpError, truncateText, type NormalizedError } from './output.ts';
+import { TurnCollector, normalizeAcpError, type NormalizedError } from './output.ts';
 
 export class BridgeError extends Error {
   readonly code: string;
@@ -168,6 +169,9 @@ export class SessionBridge {
     this.#client = undefined;
     this.#process = undefined;
     this.#lastConnectError = undefined;
+    // A new ACP process knows nothing about the sessions the previous one had
+    // activated; drop our records so resume/send do not trust stale state.
+    this.#forgetActiveSessions('acp reconnect');
 
     const env: NodeJS.ProcessEnv = { ...process.env };
     if (this.#config.dshHome !== undefined) env.DSH_HOME = this.#config.dshHome;
@@ -178,6 +182,7 @@ export class SessionBridge {
       env,
       logger: this.#logger,
       onExit: (exit) => {
+        this.#forgetActiveSessions('dsh acp process exited');
         this.#client?.markClosed(
           `dsh acp process exited (code=${String(exit.code)}, signal=${String(exit.signal)})`,
         );
@@ -213,15 +218,7 @@ export class SessionBridge {
     this.#client = client;
 
     try {
-      const initialized = await Promise.race([
-        client.initialize(),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new AcpTimeoutError('initialize', this.#config.connectTimeoutMs)),
-            this.#config.connectTimeoutMs,
-          ),
-        ),
-      ]);
+      const initialized = await client.initialize({ timeoutMs: this.#config.connectTimeoutMs });
       this.#initializeResult = initialized;
       this.#startedAt = Date.now();
       this.#logger.info(
@@ -231,12 +228,40 @@ export class SessionBridge {
     } catch (error) {
       const normalized = normalizeAcpError(error);
       this.#lastConnectError = normalized;
+      this.#forgetActiveSessions('acp handshake failed');
       client.markClosed(normalized.message);
       await child.close(this.#config.closeTimeoutMs).catch(() => undefined);
       this.#process = undefined;
       this.#client = undefined;
       throw new BridgeError(normalized.code, normalized.message, normalized.details);
     }
+  }
+
+  /** Drop records that are only valid for the ACP connection that created them. */
+  #forgetActiveSessions(reason: string): void {
+    if (this.#sessions.size > 0 || this.#inflight.size > 0) {
+      this.#logger.info(`forgetting ${this.#sessions.size} active session record(s): ${reason}`);
+    }
+    this.#sessions.clear();
+    this.#inflight.clear();
+  }
+
+  /**
+   * Forward an MCP request cancellation to the matching ACP session.
+   *
+   * Returns true when an in-flight prompt was found (and aborted locally); DSH
+   * still decides cooperatively whether it stops.
+   */
+  cancelInFlight(sessionId: string): boolean {
+    const inflight = this.#inflight.get(sessionId);
+    if (inflight === undefined) return false;
+    try {
+      this.#client?.notify('session/cancel', { sessionId });
+    } catch {
+      // The connection may already be gone; the abort below still releases us.
+    }
+    inflight.abort.abort();
+    return true;
   }
 
   #routeUpdate(params: unknown): void {
@@ -359,7 +384,8 @@ export class SessionBridge {
               type: 'string',
               enum: ['deny', 'allow_once'],
               default: 'deny',
-              description: 'Default permission policy recorded for later prompts.',
+              description:
+                'Validated for compatibility but NOT inherited: pass permission_policy explicitly on each dsh_send_message.',
             },
           },
           ['session_id', 'cwd', 'acknowledge_released'],
@@ -459,25 +485,46 @@ export class SessionBridge {
     let feedCursor = cursor;
     let nextCursor: string | null = null;
     let pages = 0;
+    let filteredOut = 0;
+    let skippedInPage = 0;
+
     while (collected.length < limit) {
       const response = (await client.request('session/list', { cwd: cwd ?? null, cursor: feedCursor ?? null })) as {
         sessions?: unknown[];
         nextCursor?: string | null;
       };
       const page = Array.isArray(response?.sessions) ? response.sessions : [];
+      nextCursor = typeof response?.nextCursor === 'string' ? response.nextCursor : null;
+      feedCursor = nextCursor ?? undefined;
+      pages += 1;
+
+      const visible: Array<Record<string, unknown>> = [];
       for (const entry of page) {
         if (entry === null || typeof entry !== 'object') continue;
         const summary = entry as Record<string, unknown>;
-        collected.push({
+        // Without a caller-supplied cwd, still honour the directory allowlist so
+        // this tool cannot enumerate sessions from unrelated projects.
+        if (cwd === undefined && !isWithinAllowedCwds(summary.cwd, this.#config.allowedCwds)) {
+          filteredOut += 1;
+          continue;
+        }
+        visible.push({
           sessionId: summary.sessionId,
           cwd: summary.cwd,
           ...(typeof summary.title === 'string' ? { title: summary.title } : {}),
           ...(typeof summary.updatedAt === 'string' ? { updatedAt: summary.updatedAt } : {}),
         });
       }
-      nextCursor = typeof response?.nextCursor === 'string' ? response.nextCursor : null;
-      feedCursor = nextCursor ?? undefined;
-      pages += 1;
+
+      // `limit` is a strict cap on returned rows. If the page would overflow it,
+      // stop and keep the server cursor, flagging that the page was cut short.
+      const room = limit - collected.length;
+      const take = visible.slice(0, room);
+      collected.push(...take);
+      if (visible.length > take.length) {
+        skippedInPage = visible.length - take.length;
+        break;
+      }
       if (nextCursor === null || page.length === 0) break;
       if (pages >= 10) break;
     }
@@ -492,9 +539,14 @@ export class SessionBridge {
               source: 'session/list',
               sessions: collected,
               count: collected.length,
+              limit,
               nextCursor,
               hasMore: nextCursor !== null,
-              pageSizeHint: 'the DSH profile caps each ACP page (sessionListPageSize, default 100)',
+              limitReached: skippedInPage > 0,
+              skippedInPage,
+              filteredOut,
+              pageSizeHint:
+                'DSH caps each ACP page (sessionListPageSize, default 100); nextCursor continues after the returned page',
             },
             null,
             2,
@@ -648,7 +700,9 @@ export class SessionBridge {
     if (!cwdDecision.ok || cwdDecision.cwd === undefined) {
       throw new BridgeError('DSH_INVALID_CWD', cwdDecision.reason ?? 'invalid cwd');
     }
-    const policy = readPermissionPolicy(input.permission_policy);
+    // Validated for compatibility, but no longer stored: an allow decision must
+    // be supplied explicitly on every dsh_send_message call.
+    readPermissionPolicy(input.permission_policy);
 
     if (this.#sessions.has(sessionId)) {
       throw new BridgeError(
@@ -679,7 +733,6 @@ export class SessionBridge {
       mcpServers: [],
     })) as { configOptions?: unknown[] };
     this.#sessions.set(sessionId, { sessionId, cwd: cwdDecision.cwd, createdAt: Date.now() });
-    this.#defaultPolicies.set(sessionId, policy);
 
     return {
       content: [
@@ -701,8 +754,6 @@ export class SessionBridge {
       ],
     };
   }
-
-  readonly #defaultPolicies = new Map<string, 'deny' | 'allow_once'>();
 
   async #findListedSession(
     client: AcpClient,
@@ -743,7 +794,7 @@ export class SessionBridge {
     const client = await this.#requireClient();
     const sessionId = readRequiredString(input.session_id, 'session_id');
     const text = readRequiredString(input.text, 'text');
-    const policy = readPermissionPolicy(input.permission_policy ?? this.#defaultPolicies.get(sessionId) ?? 'deny');
+    const policy = readPermissionPolicy(input.permission_policy);
     const timeoutMs = Math.min(
       readInteger(input.timeout_ms, this.#config.promptTimeoutMs, 1_000, Number.MAX_SAFE_INTEGER, 'timeout_ms'),
       this.#config.promptTimeoutMs,
@@ -763,7 +814,11 @@ export class SessionBridge {
       );
     }
 
-    const collector = new TurnCollector({ includeThoughts: this.#config.includeThoughts });
+    const collector = new TurnCollector({
+      includeThoughts: this.#config.includeThoughts,
+      maxChars: this.#config.maxOutputChars,
+      maxToolChars: this.#config.maxOutputChars,
+    });
     const abort = new AbortController();
     this.#inflight.set(sessionId, { policy, collector, abort });
     try {
@@ -774,8 +829,12 @@ export class SessionBridge {
       )) as { stopReason?: unknown; usage?: unknown };
       const turn = collector.collect();
       const stopReason = typeof promptResponse?.stopReason === 'string' ? promptResponse.stopReason : 'unknown';
-      const answer = truncateText(turn.assistantText, this.#config.maxOutputChars);
-      const thoughts = truncateText(turn.thoughts, this.#config.maxOutputChars);
+      const answer = {
+        text: turn.assistantText,
+        truncated: turn.assistantTruncated,
+        originalChars: turn.assistantOriginalChars,
+      };
+      const thoughts = { text: turn.thoughts, truncated: turn.thoughtsTruncated };
       return {
         content: [
           {
@@ -794,6 +853,7 @@ export class SessionBridge {
                 thoughts_truncated: thoughts.truncated,
                 thoughts_included: this.#config.includeThoughts,
                 tool_calls: turn.toolCalls,
+                truncated_tool_fields: turn.truncatedToolFields,
                 usage: turn.usage ?? promptResponse?.usage ?? null,
                 permission_policy: policy,
                 permission_events: this.#permissionLog.filter((entry) => entry.sessionId === sessionId),
@@ -872,7 +932,6 @@ export class SessionBridge {
     }
     await client.request('session/close', { sessionId });
     this.#sessions.delete(sessionId);
-    this.#defaultPolicies.delete(sessionId);
     this.#inflight.delete(sessionId);
     return {
       content: [

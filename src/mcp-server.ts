@@ -58,6 +58,8 @@ export class McpServer {
   #listChangedSent = false;
   #shutdownResolve: (() => void) | undefined;
   readonly #shutdownPromise: Promise<void>;
+  /** MCP request id -> in-flight tool call, used to route cancellations. */
+  readonly #toolRequests = new Map<number | string, { tool: string; sessionId?: string }>();
 
   constructor(options: McpServerOptions) {
     this.#input = options.input;
@@ -151,7 +153,7 @@ export class McpServer {
         return;
       }
       try {
-        const result = await this.#handleRequest(message.method, message.params);
+        const result = await this.#handleRequest(message.method, message.params, message.id);
         this.#write({ jsonrpc: '2.0', id: message.id, result });
       } catch (error) {
         const method = message.method;
@@ -187,7 +189,21 @@ export class McpServer {
         return;
       case 'notifications/cancelled': {
         const record = (params ?? {}) as Record<string, unknown>;
-        this.#logger.info(`mcp client cancelled request ${String(record.requestId)}: ${String(record.reason ?? '')}`);
+        const requestId = record.requestId;
+        const tracked =
+          typeof requestId === 'number' || typeof requestId === 'string'
+            ? this.#toolRequests.get(requestId)
+            : undefined;
+        if (tracked?.tool === 'dsh_send_message' && tracked.sessionId !== undefined) {
+          const found = this.#bridge.cancelInFlight(tracked.sessionId);
+          this.#logger.info(
+            `mcp client cancelled request ${String(requestId)} (${tracked.tool}) -> session/cancel ${tracked.sessionId} (in_flight=${found})`,
+          );
+        } else {
+          this.#logger.info(
+            `mcp client cancelled request ${String(requestId)}: no in-flight bridge work to stop (${String(record.reason ?? '')})`,
+          );
+        }
         return;
       }
       case 'notifications/roots/list_changed':
@@ -198,7 +214,7 @@ export class McpServer {
     }
   }
 
-  async #handleRequest(method: string, params: unknown): Promise<unknown> {
+  async #handleRequest(method: string, params: unknown, requestId?: number | string): Promise<unknown> {
     switch (method) {
       case 'initialize':
         return this.#initialize(params);
@@ -207,7 +223,7 @@ export class McpServer {
       case 'tools/list':
         return this.#toolsList(params);
       case 'tools/call':
-        return this.#toolsCall(params);
+        return this.#toolsCall(params, requestId);
       default:
         throw new JsonRpcError(-32601, `method not found: ${method}`);
     }
@@ -250,7 +266,7 @@ export class McpServer {
     return { tools: catalog.tools };
   }
 
-  async #toolsCall(params: unknown): Promise<Record<string, unknown>> {
+  async #toolsCall(params: unknown, requestId?: number | string): Promise<Record<string, unknown>> {
     const record = (params ?? {}) as Record<string, unknown>;
     const name = record.name;
     if (typeof name !== 'string' || name === '') {
@@ -264,9 +280,16 @@ export class McpServer {
     if (!catalog.tools.some((entry) => entry.name === name)) {
       throw new JsonRpcError(-32602, `unknown tool: ${name} (available: ${catalog.tools.map((entry) => entry.name).join(', ')})`);
     }
-    this.#logger.info(`mcp tools/call ${name}`);
-    const outcome = await this.#bridge.call(name, (args ?? {}) as Record<string, unknown>);
-    return outcome as unknown as Record<string, unknown>;
+    const toolArgs = (args ?? {}) as Record<string, unknown>;
+    const sessionId = typeof toolArgs.session_id === 'string' ? toolArgs.session_id : undefined;
+    if (requestId !== undefined) this.#toolRequests.set(requestId, { tool: name, sessionId });
+    try {
+      this.#logger.info(`mcp tools/call ${name}`);
+      const outcome = await this.#bridge.call(name, toolArgs);
+      return outcome as unknown as Record<string, unknown>;
+    } finally {
+      if (requestId !== undefined) this.#toolRequests.delete(requestId);
+    }
   }
 
   #notify(method: string, params: unknown): void {

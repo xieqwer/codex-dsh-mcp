@@ -34,7 +34,7 @@ DSH_CODEX_LOG_FILE = 'D:\path\to\codex-dsh-mcp\.codex-dsh-mcp.log'
 DSH_CODEX_LOG_LEVEL = 'info'
 
 # 可选：指向明确的 DSH 启动器。不设置时桥接自动探测安装目录的 dsh.cmd。
-# ⚠️ PATH 上的 dsh 可能是旧的 npm 全局版本（本机实测 0.1.5-rc.1），不要用它。
+# PATH 上的 dsh 可能来自另一版本；需要固定安装时显式指定路径。
 # DSH_CODEX_DSH_COMMAND = 'C:\Users\<user>\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd'
 
 # 可选：超时微调（毫秒）。
@@ -56,5 +56,6 @@ DSH_CODEX_LOG_LEVEL = 'info'
 # 4) 不接入 Codex 也能自检（不消耗模型 token）：
 #      node scripts/real-e2e-probe.ts
 #
-# 注意：桥接不会读取或写入任何密钥；这里不需要 API key。DSH 自己使用它自己的
-# 凭据（~/.dsh/.credentials.yaml），桥接不碰。
+# 这里无需单独填写 API key；DSH 使用自身凭据。子进程继承宿主环境和权限，
+# 目录允许列表不是执行沙箱；不带 cwd 的 list 也可返回其他目录的会话摘要。
+# 完整变量、权限继承、超时及输出边界见 docs/configuration.md。

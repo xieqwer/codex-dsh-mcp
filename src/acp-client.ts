@@ -320,7 +320,15 @@ export class AcpClient {
     this.#write({ jsonrpc: '2.0', method, params });
   }
 
-  async initialize(): Promise<InitializeResult> {
+  /**
+   * Perform the ACP handshake.
+   *
+   * `timeoutMs` overrides the client-wide request timeout so a bridge can give
+   * `initialize` the (usually longer) connect budget without a separate
+   * Promise.race wrapper.
+   */
+  async initialize(options: { timeoutMs?: number } = {}): Promise<InitializeResult> {
+    const handshakeTimeout = options.timeoutMs ?? this.#requestTimeoutMs;
     const result = (await this.request(
       'initialize',
       {
@@ -328,7 +336,7 @@ export class AcpClient {
         clientCapabilities: { terminal: false },
         clientInfo: { name: this.#clientName, version: this.#clientVersion },
       },
-      { timeoutMs: this.#requestTimeoutMs },
+      { timeoutMs: handshakeTimeout },
     )) as InitializeResult;
 
     if (typeof result?.protocolVersion !== 'number') {
@@ -349,7 +357,7 @@ export class AcpClient {
     if (authMethods.length > 0) {
       const first = authMethods[0] as { id?: unknown };
       if (typeof first?.id === 'string') {
-        await this.request('authenticate', { methodId: first.id }, { timeoutMs: this.#requestTimeoutMs });
+        await this.request('authenticate', { methodId: first.id }, { timeoutMs: handshakeTimeout });
       }
     }
     return result;

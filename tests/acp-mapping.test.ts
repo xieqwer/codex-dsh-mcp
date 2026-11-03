@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { SessionBridge } from '../src/session-tools.ts';
@@ -338,6 +338,95 @@ test('thoughts are returned only when the operator opts in', async () => {
     assert.equal(result.thoughts_included, true);
     assert.equal(result.thoughts, 'thinking about it');
   } finally {
+    await scratch.shutdown();
+  }
+});
+
+test('dsh_list_sessions treats limit as a strict returned-row cap', async () => {
+  const scratch = new SessionBridge(makeConfig({ allowedCwds: [root] }), silentLogger);
+  try {
+    for (let i = 0; i < 3; i += 1) {
+      await scratch.call('dsh_create_session', { cwd: root });
+    }
+    const result = parseToolText(await scratch.call('dsh_list_sessions', { cwd: root, limit: 1 }));
+    assert.equal(result.ok, true);
+    assert.equal(result.count, 1);
+    assert.equal((result.sessions as unknown[]).length, 1);
+    assert.equal(result.limitReached, true);
+    assert.equal(Number(result.skippedInPage) >= 1, true);
+  } finally {
+    await scratch.shutdown();
+  }
+});
+
+test('unfiltered list still hides sessions outside the cwd allowlist', async () => {
+  const outside = makeTempDir('outside');
+  const existing = existsSync(sessionsFile)
+    ? (JSON.parse(readFileSync(sessionsFile, 'utf8')) as Array<Record<string, unknown>>)
+    : [];
+  writeFileSync(
+    sessionsFile,
+    JSON.stringify([...existing, { sessionId: 'outside-session', cwd: outside }]),
+    'utf8',
+  );
+  const scratch = new SessionBridge(makeConfig({ allowedCwds: [root] }), silentLogger);
+  try {
+    const result = parseToolText(await scratch.call('dsh_list_sessions', { limit: 100 }));
+    const sessions = result.sessions as Array<Record<string, unknown>>;
+    assert.equal(sessions.some((entry) => entry.sessionId === 'outside-session'), false);
+    assert.equal(Number(result.filteredOut) >= 1, true);
+  } finally {
+    await scratch.shutdown();
+    const current = JSON.parse(readFileSync(sessionsFile, 'utf8')) as Array<Record<string, unknown>>;
+    writeFileSync(
+      sessionsFile,
+      JSON.stringify(current.filter((entry) => entry.sessionId !== 'outside-session')),
+      'utf8',
+    );
+    removeDir(outside);
+  }
+});
+
+test('permission_policy passed to resume is not inherited by later messages', async () => {
+  process.env.FAKE_ACP_MODE = 'permission-request';
+  const scratch = new SessionBridge(makeConfig({ allowedCwds: [root] }), silentLogger);
+  try {
+    const created = parseToolText(await scratch.call('dsh_create_session', { cwd: root }));
+    const id = String(created.sessionId);
+    await scratch.call('dsh_close_session', { session_id: id, confirm: true });
+    const resumed = parseToolText(await scratch.call('dsh_resume_session', {
+      session_id: id,
+      cwd: root,
+      acknowledge_released: true,
+      permission_policy: 'allow_once',
+    }));
+    assert.equal(resumed.ok, true, JSON.stringify(resumed));
+    const sent = parseToolText(await scratch.call('dsh_send_message', { session_id: id, text: 'run' }));
+    assert.match(String(sent.assistant_text), /reject-once/u);
+  } finally {
+    delete process.env.FAKE_ACP_MODE;
+    await scratch.shutdown();
+  }
+});
+
+test('a fresh ACP connection can resume a session that was active before a crash', async () => {
+  process.env.FAKE_ACP_MODE = 'crash-on-prompt';
+  const scratch = new SessionBridge(makeConfig({ allowedCwds: [root] }), silentLogger);
+  try {
+    const created = parseToolText(await scratch.call('dsh_create_session', { cwd: root }));
+    const id = String(created.sessionId);
+    const crashed = parseToolText(await scratch.call('dsh_send_message', { session_id: id, text: 'crash' }));
+    assert.equal(crashed.ok, false);
+    delete process.env.FAKE_ACP_MODE;
+    await sleep(3_200);
+    const resumed = parseToolText(await scratch.call('dsh_resume_session', {
+      session_id: id,
+      cwd: root,
+      acknowledge_released: true,
+    }));
+    assert.equal(resumed.ok, true, JSON.stringify(resumed));
+  } finally {
+    delete process.env.FAKE_ACP_MODE;
     await scratch.shutdown();
   }
 });

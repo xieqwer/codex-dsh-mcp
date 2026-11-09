@@ -113,7 +113,7 @@ test('MCP initialize falls back to the newest supported version for an unknown r
   }
 });
 
-test('tools/list exposes the six business tools and no generic ACP proxy', async () => {
+test('tools/list exposes the five business tools and no generic ACP proxy', async () => {
   await bridge.ensureConnected();
   const harness = new Harness(bridge);
   try {
@@ -123,12 +123,11 @@ test('tools/list exposes the six business tools and no generic ACP proxy', async
     const tools = response.result?.tools as Array<Record<string, unknown>>;
     const names = tools.map((tool) => tool.name);
     assert.deepEqual(names, [
-      'dsh_list_sessions',
       'dsh_create_session',
-      'dsh_resume_session',
       'dsh_send_message',
       'dsh_cancel_session',
       'dsh_close_session',
+      'dsh_delete_session',
     ]);
     for (const tool of tools) {
       assert.equal(tool.inputSchema !== undefined, true, `${String(tool.name)} has an input schema`);
@@ -190,7 +189,8 @@ test('capability gating hides session/close when the agent does not advertise it
       const response = await harness.request('tools/list');
       const names = (response.result?.tools as Array<Record<string, unknown>>).map((tool) => tool.name);
       assert.equal(names.includes('dsh_close_session'), false);
-      assert.equal(names.includes('dsh_resume_session'), true);
+      // The local-cleanup tool does not depend on any ACP capability.
+      assert.equal(names.includes('dsh_delete_session'), true);
     } finally {
       await harness.close();
     }

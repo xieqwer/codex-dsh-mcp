@@ -10,7 +10,7 @@ import { createLogger } from './logger.ts';
 import { McpServer } from './mcp-server.ts';
 import { SessionBridge } from './session-tools.ts';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 async function main(): Promise<void> {
   let config;

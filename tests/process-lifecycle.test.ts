@@ -80,7 +80,7 @@ test('shutdown terminates the child and later tool calls are refused', async () 
   assert.equal(bridge.connected, true);
   await bridge.shutdown();
   assert.equal(bridge.connected, false);
-  const outcome = await bridge.call('dsh_list_sessions', {});
+  const outcome = await bridge.call('dsh_create_session', { cwd: root });
   assert.equal(outcome.isError, true);
   assert.equal(parseToolText(outcome).error?.code, 'DSH_BRIDGE_SHUTDOWN');
 });
@@ -102,7 +102,7 @@ test('a missing executable reports DSH_ACP_UNAVAILABLE and does not hang', async
     silentLogger,
   );
   try {
-    const outcome = await broken.call('dsh_list_sessions', {});
+    const outcome = await broken.call('dsh_create_session', { cwd: root });
     assert.equal(outcome.isError, true);
     const result = parseToolText(outcome);
     assert.equal(result.error?.code, 'DSH_ACP_UNAVAILABLE');

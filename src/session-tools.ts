@@ -1,10 +1,18 @@
 /**
  * Business tools mapped onto the DSH ACP surface.
  *
- * Scope is deliberately narrow: six session tools, no generic ACP proxy. Every
- * tool maps to one standard ACP method and refuses unsupported capabilities
- * loudly instead of simulating behaviour.
+ * v0.2.0 scope: create a fresh session and drive it (prompt / cancel / close),
+ * plus a bounded local delete for sessions this bridge process created. The ACP
+ * surface has no session/delete, so delete is the one deliberate exception that
+ * touches DSH storage directly; it is restricted to this process's own sessions
+ * and documented in README/SECURITY.
+ *
+ * There is deliberately NO session listing and NO resume: DSH ACP cannot replay
+ * prior transcripts and resuming a persisted session is unreliable across
+ * frontends, so the bridge does not pretend to offer history access.
  */
+import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import {
   AcpClient,
   AcpTimeoutError,
@@ -15,7 +23,7 @@ import {
 import { AcpProcess, type Logger } from './acp-process.ts';
 import {
   type BridgeConfig,
-  isWithinAllowedCwds,
+  defaultDshHome,
   validateCwd,
   validateSelection,
 } from './config.ts';
@@ -68,23 +76,28 @@ interface InflightPrompt {
   abort: AbortController;
 }
 
-const RESUME_HINT =
-  'Resume only restores a persisted inactive session and continues it; it does not replay prior transcript messages.';
-
 function tool(name: string, title: string, description: string, inputSchema: Record<string, unknown>, annotations: ToolDefinition['annotations']): ToolDefinition {
   return { name, title, description, inputSchema, annotations };
 }
-
-const JSON_SCHEMA_EMPTY = { type: 'object', properties: {}, additionalProperties: false } as const;
 
 function schemaObject(properties: Record<string, unknown>, required: string[]): Record<string, unknown> {
   return { type: 'object', properties, required, additionalProperties: false };
 }
 
+const NO_HISTORY_NOTE =
+  'The bridge does not list or resume sessions, and it never reads or replays prior transcripts: every conversation starts at dsh_create_session.';
+
 export class SessionBridge {
   readonly #config: BridgeConfig;
   readonly #logger: Logger;
+  /** Sessions activated by this ACP connection (prompt/close targets). */
   readonly #sessions = new Map<string, SessionRecord>();
+  /**
+   * Sessions created by this bridge process. Only these may be deleted: after a
+   * reconnect the ACP child forgets them, but the process still knows it made
+   * them. A fresh bridge process starts empty (use scripts/prune-sessions.ts).
+   */
+  readonly #created = new Set<string>();
   readonly #inflight = new Map<string, InflightPrompt>();
   readonly #permissionLog: Array<{ sessionId: string; toolCallId: string; decision: string }> = [];
 
@@ -170,7 +183,7 @@ export class SessionBridge {
     this.#process = undefined;
     this.#lastConnectError = undefined;
     // A new ACP process knows nothing about the sessions the previous one had
-    // activated; drop our records so resume/send do not trust stale state.
+    // activated; drop our records so prompt/close do not trust stale state.
     this.#forgetActiveSessions('acp reconnect');
 
     const env: NodeJS.ProcessEnv = { ...process.env };
@@ -202,7 +215,7 @@ export class SessionBridge {
       output: child.child.stdin,
       requestTimeoutMs: this.#config.callTimeoutMs,
       clientName: 'codex-dsh-mcp',
-      clientVersion: '0.1.0',
+      clientVersion: '0.2.0',
       onNotification: (method, params) => {
         if (method === 'session/update') {
           this.#routeUpdate(params);
@@ -294,26 +307,12 @@ export class SessionBridge {
 
   /** Build the tool catalog from the negotiated capabilities. */
   catalog(): ToolCatalog {
-    const notes: string[] = [];
+    const notes: string[] = [NO_HISTORY_NOTE];
     const tools: ToolDefinition[] = [
-      tool(
-        'dsh_list_sessions',
-        'List DSH sessions',
-        'List persisted, resumable DSH root sessions from the ACP session/list method (newest first). Optional cwd filter must be an absolute path inside the allowed directories. Returns only sessionId/cwd/title/updatedAt summaries. WARNING: sessions held by the desktop app are also listed (ACP cannot see cross-process activity); visibility does not mean the session is free.',
-        schemaObject(
-          {
-            cwd: { type: 'string', description: 'Absolute working directory to filter by (realpath validated).' },
-            cursor: { type: 'string', description: 'Opaque cursor from a previous nextCursor field.' },
-            limit: { type: 'integer', minimum: 1, maximum: 100, default: 20, description: 'Maximum summaries to return.' },
-          },
-          [],
-        ),
-        { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-      ),
       tool(
         'dsh_create_session',
         'Create a DSH session',
-        'Create a fresh persistent DSH session via ACP session/new. cwd must be absolute, inside the configured allowlist, and is realpath-canonicalised before use. model / reasoning_effort are only accepted when explicitly allowlisted by the bridge.',
+        'Create a fresh persistent DSH session via ACP session/new. cwd must be absolute, inside the configured allowlist, and is realpath-canonicalised before use. model / reasoning_effort are only accepted when explicitly allowlisted by the bridge. Every conversation starts here: the bridge does not list or resume existing sessions.',
         schemaObject(
           {
             cwd: { type: 'string', description: 'Absolute working directory for the new session.' },
@@ -331,10 +330,10 @@ export class SessionBridge {
       tool(
         'dsh_send_message',
         'Send a message to a DSH session',
-        'Send one user text message to an existing session via ACP session/prompt and wait for the turn to settle. Exactly one prompt may be in flight per session. Returns the assistant text, a tool-call summary and usage. DSH internal thoughts (agent_thought_chunk) are NOT returned unless the operator set DSH_CODEX_INCLUDE_THOUGHTS. Permission requests made by DSH tools are DENIED unless permission_policy is explicitly "allow_once"; they are never auto-approved.',
+        'Send one user text message to a session created by this bridge process via ACP session/prompt and wait for the turn to settle. Exactly one prompt may be in flight per session. Returns the assistant text, a tool-call summary and usage. DSH internal thoughts (agent_thought_chunk) are NOT returned unless the operator set DSH_CODEX_INCLUDE_THOUGHTS. Permission requests made by DSH tools are DENIED unless permission_policy is explicitly "allow_once"; they are never auto-approved.',
         schemaObject(
           {
-            session_id: { type: 'string', description: 'Explicit session id (never defaulted to "most recent").' },
+            session_id: { type: 'string', description: 'Explicit session id returned by dsh_create_session.' },
             text: { type: 'string', description: 'User message text.' },
             permission_policy: {
               type: 'string',
@@ -364,50 +363,20 @@ export class SessionBridge {
     const client = this.#client;
     const knownCapabilities = client !== undefined && !client.closed;
 
-    if (client !== undefined && !client.closed && !client.supportsSessionResume) {
-      notes.push('dsh_resume_session is hidden: the agent did not advertise sessionCapabilities.resume.');
-    } else {
-      tools.splice(2, 0, tool(
-        'dsh_resume_session',
-        'Resume a DSH session',
-        `Restore a persisted inactive DSH session via ACP session/resume, validating canonical cwd and session ownership first. ${RESUME_HINT} WARNING: DSH ACP cannot see sessions held by another process (the desktop app), so session/list also lists sessions the desktop may still be running. Resuming is NOT read-only: it activates the session and writes to the same persisted log, which can conflict with the desktop. Requires acknowledge_released=true, and switching desktop tabs does not count as releasing.`,
-        schemaObject(
-          {
-            session_id: { type: 'string', description: 'Explicit persisted session id.' },
-            cwd: { type: 'string', description: 'Absolute working directory; must match the session canonical cwd.' },
-            acknowledge_released: {
-              type: 'boolean',
-              description:
-                'Must be true. Confirms the session is not in use by the desktop app (closed there, not merely a background tab).',
-            },
-            permission_policy: {
-              type: 'string',
-              enum: ['deny', 'allow_once'],
-              default: 'deny',
-              description:
-                'Validated for compatibility but NOT inherited: pass permission_policy explicitly on each dsh_send_message.',
-            },
-          },
-          ['session_id', 'cwd', 'acknowledge_released'],
-        ),
-        { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-      ));
-    }
-
     if (client !== undefined && !client.closed && !client.supportsSessionClose) {
-      notes.push('dsh_close_session is hidden: the agent did not advertise sessionCapabilities.close.');
+      notes.push('dsh_close_session and dsh_delete_session (when the session is still active) are hidden: the agent did not advertise sessionCapabilities.close.');
     } else {
       tools.push(tool(
         'dsh_close_session',
         'Close a DSH session',
-        'Close exactly one session via ACP session/close. This cancels in-flight work, drains updates, flushes persistence, and releases the session run scope. Persisted history is retained and can be resumed later. Requires confirm=true. Closing is NOT read-only and is NOT a safe way to inspect a session; it will cancel that session\'s in-flight work.',
+        'Close exactly one session via ACP session/close. This cancels in-flight work, drains updates, flushes persistence, and releases the session run scope. Persisted storage is retained (the bridge offers no resume, so the session becomes dormant). Requires confirm=true. Closing is NOT read-only and is NOT a safe way to inspect a session; it will cancel that session\'s in-flight work.',
         schemaObject(
           {
             session_id: { type: 'string', description: 'Explicit session id to close.' },
             confirm: {
               type: 'boolean',
               description:
-                'Must be true: closing cancels in-flight work and releases run resources (history is kept; it is not read-only).',
+                'Must be true: closing cancels in-flight work and releases run resources (it is not read-only).',
             },
           },
           ['session_id', 'confirm'],
@@ -416,9 +385,26 @@ export class SessionBridge {
       ));
     }
 
+    tools.push(tool(
+      'dsh_delete_session',
+      'Delete a DSH session (local storage)',
+      'Permanently delete the local persisted storage of a session CREATED BY THIS BRIDGE PROCESS. DSH ACP has no session/delete method, so this removes the session directory under DSH_HOME/sessions directly; it is the only way to remove one. A still-active session is closed first (requires sessionCapabilities.close). Requires confirm=true. Sessions created by the desktop app or by a previous bridge process are refused; run scripts/prune-sessions.ts for explicit manual cleanup.',
+      schemaObject(
+        {
+          session_id: { type: 'string', description: 'Explicit session id created by this bridge process.' },
+          confirm: {
+            type: 'boolean',
+            description: 'Must be true: deleting permanently removes the session\'s local persisted files (cannot be undone).',
+          },
+        },
+        ['session_id', 'confirm'],
+      ),
+      { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    ));
+
     if (!knownCapabilities) {
       notes.push(
-        'ACP capabilities are not negotiated yet: the catalog lists all six tools and any call that hits a missing method returns DSH_UNSUPPORTED.',
+        'ACP capabilities are not negotiated yet: the catalog lists the default tools and any call that hits a missing method returns DSH_UNSUPPORTED.',
       );
     }
     if (this.#lastConnectError !== undefined) {
@@ -433,18 +419,16 @@ export class SessionBridge {
     const input = args ?? {};
     try {
       switch (name) {
-        case 'dsh_list_sessions':
-          return await this.#listSessions(input);
         case 'dsh_create_session':
           return await this.#createSession(input);
-        case 'dsh_resume_session':
-          return await this.#resumeSession(input);
         case 'dsh_send_message':
           return await this.#sendMessage(input);
         case 'dsh_cancel_session':
           return await this.#cancelSession(input);
         case 'dsh_close_session':
           return await this.#closeSession(input);
+        case 'dsh_delete_session':
+          return await this.#deleteSession(input);
         default:
           throw new BridgeError('DSH_UNKNOWN_TOOL', `unknown tool ${name}`);
       }
@@ -462,98 +446,6 @@ export class SessionBridge {
 
   async #requireClient(): Promise<AcpClient> {
     return this.ensureConnected();
-  }
-
-  async #listSessions(input: Record<string, unknown>): Promise<ToolCallOutcome> {
-    const client = await this.#requireClient();
-    if (!client.supportsSessionList) {
-      throw new BridgeError(
-        'DSH_UNSUPPORTED',
-        `the agent did not advertise sessionCapabilities.list (negotiated=${JSON.stringify(client.capabilities)})`,
-      );
-    }
-    let cwd: string | undefined;
-    if (input.cwd !== undefined) {
-      const decision = validateCwd(input.cwd, this.#config);
-      if (!decision.ok) throw new BridgeError('DSH_INVALID_CWD', decision.reason ?? 'invalid cwd');
-      cwd = decision.cwd;
-    }
-    const limit = readInteger(input.limit, 20, 1, 100, 'limit');
-    const cursor = readOptionalString(input.cursor, 'cursor');
-
-    const collected: Array<Record<string, unknown>> = [];
-    let feedCursor = cursor;
-    let nextCursor: string | null = null;
-    let pages = 0;
-    let filteredOut = 0;
-    let skippedInPage = 0;
-
-    while (collected.length < limit) {
-      const response = (await client.request('session/list', { cwd: cwd ?? null, cursor: feedCursor ?? null })) as {
-        sessions?: unknown[];
-        nextCursor?: string | null;
-      };
-      const page = Array.isArray(response?.sessions) ? response.sessions : [];
-      nextCursor = typeof response?.nextCursor === 'string' ? response.nextCursor : null;
-      feedCursor = nextCursor ?? undefined;
-      pages += 1;
-
-      const visible: Array<Record<string, unknown>> = [];
-      for (const entry of page) {
-        if (entry === null || typeof entry !== 'object') continue;
-        const summary = entry as Record<string, unknown>;
-        // Without a caller-supplied cwd, still honour the directory allowlist so
-        // this tool cannot enumerate sessions from unrelated projects.
-        if (cwd === undefined && !isWithinAllowedCwds(summary.cwd, this.#config.allowedCwds)) {
-          filteredOut += 1;
-          continue;
-        }
-        visible.push({
-          sessionId: summary.sessionId,
-          cwd: summary.cwd,
-          ...(typeof summary.title === 'string' ? { title: summary.title } : {}),
-          ...(typeof summary.updatedAt === 'string' ? { updatedAt: summary.updatedAt } : {}),
-        });
-      }
-
-      // `limit` is a strict cap on returned rows. If the page would overflow it,
-      // stop and keep the server cursor, flagging that the page was cut short.
-      const room = limit - collected.length;
-      const take = visible.slice(0, room);
-      collected.push(...take);
-      if (visible.length > take.length) {
-        skippedInPage = visible.length - take.length;
-        break;
-      }
-      if (nextCursor === null || page.length === 0) break;
-      if (pages >= 10) break;
-    }
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              ok: true,
-              source: 'session/list',
-              sessions: collected,
-              count: collected.length,
-              limit,
-              nextCursor,
-              hasMore: nextCursor !== null,
-              limitReached: skippedInPage > 0,
-              skippedInPage,
-              filteredOut,
-              pageSizeHint:
-                'DSH caps each ACP page (sessionListPageSize, default 100); nextCursor continues after the returned page',
-            },
-            null,
-            2,
-          ),
-        },
-      ],
-    };
   }
 
   async #createSession(input: Record<string, unknown>): Promise<ToolCallOutcome> {
@@ -585,6 +477,7 @@ export class SessionBridge {
       throw new BridgeError('DSH_ACP_PROTOCOL', 'session/new returned no sessionId');
     }
     this.#sessions.set(sessionId, { sessionId, cwd: cwdDecision.cwd, createdAt: Date.now() });
+    this.#created.add(sessionId);
 
     const configOptions = Array.isArray(response?.configOptions) ? response.configOptions : [];
     const appliedModel = model.value === undefined
@@ -681,115 +574,6 @@ export class SessionBridge {
     }
   }
 
-  async #resumeSession(input: Record<string, unknown>): Promise<ToolCallOutcome> {
-    const client = await this.#requireClient();
-    if (!client.supportsSessionResume) {
-      throw new BridgeError('DSH_UNSUPPORTED', 'the agent did not advertise sessionCapabilities.resume');
-    }
-    const sessionId = readRequiredString(input.session_id, 'session_id');
-    // Resuming activates the session and writes to its persisted log; DSH ACP
-    // cannot detect that the desktop process still holds it, so require an
-    // explicit release acknowledgement instead of pretending resume is read-only.
-    if (input.acknowledge_released !== true) {
-      throw new BridgeError(
-        'DSH_INVALID_ARGUMENT',
-        'dsh_resume_session requires acknowledge_released=true: resuming activates the session and writes to its persisted log (it is not read-only), and DSH cannot see whether the desktop app still holds it. Close the session in the desktop first; switching tabs does not release it.',
-      );
-    }
-    const cwdDecision = validateCwd(input.cwd, this.#config);
-    if (!cwdDecision.ok || cwdDecision.cwd === undefined) {
-      throw new BridgeError('DSH_INVALID_CWD', cwdDecision.reason ?? 'invalid cwd');
-    }
-    // Validated for compatibility, but no longer stored: an allow decision must
-    // be supplied explicitly on every dsh_send_message call.
-    readPermissionPolicy(input.permission_policy);
-
-    if (this.#sessions.has(sessionId)) {
-      throw new BridgeError(
-        'DSH_SESSION_ACTIVE',
-        `session ${sessionId} is already active in this bridge; send a message or close it first`,
-      );
-    }
-
-    // Ownership check: the session must be listable and its canonical cwd must
-    // match the caller's request before we ask ACP to activate it.
-    const ownership = await this.#findListedSession(client, sessionId, cwdDecision.cwd);
-    if (ownership.status === 'not-listed') {
-      throw new BridgeError(
-        'DSH_SESSION_NOT_RESUMABLE',
-        `session ${sessionId} is not a persisted resumable root session visible to session/list (it may not exist, belong to a subagent, or be active in another frontend)`,
-      );
-    }
-    if (ownership.status === 'cwd-mismatch') {
-      throw new BridgeError(
-        'DSH_CWD_MISMATCH',
-        `session ${sessionId} canonical cwd is ${JSON.stringify(ownership.actualCwd)} but ${JSON.stringify(cwdDecision.cwd)} was requested`,
-      );
-    }
-
-    const response = (await client.request('session/resume', {
-      sessionId,
-      cwd: cwdDecision.cwd,
-      mcpServers: [],
-    })) as { configOptions?: unknown[] };
-    this.#sessions.set(sessionId, { sessionId, cwd: cwdDecision.cwd, createdAt: Date.now() });
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              ok: true,
-              source: 'session/resume',
-              sessionId,
-              cwd: cwdDecision.cwd,
-              configOptions: response?.configOptions ?? null,
-              note: RESUME_HINT,
-            },
-            null,
-            2,
-          ),
-        },
-      ],
-    };
-  }
-
-  async #findListedSession(
-    client: AcpClient,
-    sessionId: string,
-    expectedCwd: string,
-  ): Promise<{ status: 'ok' } | { status: 'not-listed' } | { status: 'cwd-mismatch'; actualCwd: string }> {
-    if (!client.supportsSessionList) {
-      throw new BridgeError(
-        'DSH_UNSUPPORTED',
-        'cannot verify session ownership: the agent did not advertise sessionCapabilities.list',
-      );
-    }
-    let cursor: string | undefined;
-    for (let page = 0; page < 50; page += 1) {
-      const response = (await client.request('session/list', { cwd: null, cursor: cursor ?? null })) as {
-        sessions?: unknown[];
-        nextCursor?: string | null;
-      };
-      const sessions = Array.isArray(response?.sessions) ? response.sessions : [];
-      for (const entry of sessions) {
-        if (entry === null || typeof entry !== 'object') continue;
-        const summary = entry as Record<string, unknown>;
-        if (summary.sessionId !== sessionId) continue;
-        const actualCwd = typeof summary.cwd === 'string' ? summary.cwd : '';
-        if (actualCwd === '') return { status: 'not-listed' };
-        return samePath(actualCwd, expectedCwd)
-          ? { status: 'ok' }
-          : { status: 'cwd-mismatch', actualCwd };
-      }
-      const next = typeof response?.nextCursor === 'string' ? response.nextCursor : null;
-      if (next === null || sessions.length === 0) return { status: 'not-listed' };
-      cursor = next;
-    }
-    return { status: 'not-listed' };
-  }
-
   async #sendMessage(input: Record<string, unknown>): Promise<ToolCallOutcome> {
     const client = await this.#requireClient();
     const sessionId = readRequiredString(input.session_id, 'session_id');
@@ -804,7 +588,7 @@ export class SessionBridge {
     if (known === undefined) {
       throw new BridgeError(
         'DSH_SESSION_UNKNOWN',
-        `session ${sessionId} is not active in this bridge; call dsh_create_session or dsh_resume_session first (the bridge never defaults to the most recent session)`,
+        `session ${sessionId} is not active in this bridge; call dsh_create_session first (the bridge never defaults to "the most recent session" and does not resume prior sessions)`,
       );
     }
     if (this.#inflight.has(sessionId)) {
@@ -924,7 +708,7 @@ export class SessionBridge {
     if (input.confirm !== true) {
       throw new BridgeError(
         'DSH_INVALID_ARGUMENT',
-        'dsh_close_session requires confirm=true: it cancels in-flight work, drains updates, releases the session run scope, and keeps persisted history',
+        'dsh_close_session requires confirm=true: it cancels in-flight work, drains updates, releases the session run scope, and keeps persisted storage',
       );
     }
     if (!this.#sessions.has(sessionId)) {
@@ -943,8 +727,86 @@ export class SessionBridge {
               source: 'session/close',
               session_id: sessionId,
               closed: true,
-              persisted_history_retained: true,
-              note: 'the session scope was released; it can be resumed later with dsh_resume_session',
+              persisted_storage_retained: true,
+              note: 'the session scope was released; the bridge does not offer resume or transcript replay, so the persisted session is now dormant. Delete it with dsh_delete_session if it was created here and is no longer needed.',
+            },
+            null,
+            2,
+          ),
+        },
+      ],
+    };
+  }
+
+  async #deleteSession(input: Record<string, unknown>): Promise<ToolCallOutcome> {
+    const sessionId = readRequiredString(input.session_id, 'session_id');
+    if (input.confirm !== true) {
+      throw new BridgeError(
+        'DSH_INVALID_ARGUMENT',
+        'dsh_delete_session requires confirm=true: it permanently removes the session\'s local persisted storage (this cannot be undone)',
+      );
+    }
+    // The id becomes a directory name: refuse separators, dots, drive colons
+    // and anything that could step outside the sessions root.
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(sessionId)) {
+      throw new BridgeError(
+        'DSH_INVALID_ARGUMENT',
+        'session_id contains characters that are not valid in a DSH session directory name',
+      );
+    }
+    if (!this.#created.has(sessionId)) {
+      throw new BridgeError(
+        'DSH_SESSION_NOT_DELETABLE',
+        `session ${sessionId} was not created by this bridge process; only sessions created here can be deleted. DSH ACP has no delete method, so cross-process cleanup is an explicit manual operation: node scripts/prune-sessions.ts`,
+      );
+    }
+    if (this.#inflight.has(sessionId)) {
+      throw new BridgeError(
+        'DSH_SESSION_BUSY',
+        `session ${sessionId} has an in-flight prompt; wait for it or call dsh_cancel_session before deleting`,
+      );
+    }
+
+    if (this.#sessions.has(sessionId)) {
+      // Release the run scope first so no file handle is held by DSH when the
+      // storage directory disappears. Deleting active sessions is what
+      // confirm=true is for; the tool result reports that it closed first.
+      const client = await this.#requireClient();
+      if (!client.supportsSessionClose) {
+        throw new BridgeError(
+          'DSH_UNSUPPORTED',
+          `session ${sessionId} is still active and the agent did not advertise sessionCapabilities.close; refusing to delete storage under an active session`,
+        );
+      }
+      await client.request('session/close', { sessionId });
+      this.#sessions.delete(sessionId);
+      this.#logger.info(`closed active session ${sessionId} before deleting its storage`);
+    }
+
+    const home = this.#config.dshHome ?? defaultDshHome();
+    const sessionsRoot = join(home, 'sessions');
+    const found = findSessionDirectory(sessionsRoot, sessionId);
+    if (found === undefined) {
+      throw new BridgeError(
+        'DSH_SESSION_STORAGE_NOT_FOUND',
+        `no persisted session directory named ${sessionId} under ${sessionsRoot}`,
+      );
+    }
+    rmSync(found, { recursive: true, force: false });
+    this.#created.delete(sessionId);
+    this.#logger.info(`deleted local session storage ${found}`);
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              ok: true,
+              source: 'local filesystem (no ACP session/delete)',
+              session_id: sessionId,
+              deleted: true,
+              path: relative(home, found),
+              note: 'DSH ACP exposes no session/delete, so the bridge removed the persisted directory directly. Only sessions created by this bridge process can be deleted.',
             },
             null,
             2,
@@ -971,6 +833,27 @@ export class SessionBridge {
   }
 }
 
+/** Locate `<DSH_HOME>/sessions/**\/<sessionId>` without trusting the cwd encoding. */
+function findSessionDirectory(sessionsRoot: string, sessionId: string): string | undefined {
+  if (!existsSync(sessionsRoot)) return undefined;
+  const candidates = [join(sessionsRoot, sessionId)];
+  try {
+    for (const entry of readdirSync(sessionsRoot, { withFileTypes: true })) {
+      if (entry.isDirectory()) candidates.push(join(sessionsRoot, entry.name, sessionId));
+    }
+  } catch {
+    return undefined;
+  }
+  for (const candidate of candidates) {
+    try {
+      if (statSync(candidate).isDirectory()) return candidate;
+    } catch {
+      // not this one
+    }
+  }
+  return undefined;
+}
+
 function decidePermission(request: PermissionRequest, policy: 'deny' | 'allow_once'): PermissionDecision {
   const options = Array.isArray(request.options) ? request.options : [];
   if (policy === 'allow_once') {
@@ -983,12 +866,6 @@ function decidePermission(request: PermissionRequest, policy: 'deny' | 'allow_on
   if (reject !== undefined) return { outcome: 'selected', optionId: reject.optionId };
   // No reject option advertised: cancelling is the only non-approving answer.
   return { outcome: 'cancelled' };
-}
-
-function samePath(left: string, right: string): boolean {
-  const a = process.platform === 'win32' ? left.toLowerCase() : left;
-  const b = process.platform === 'win32' ? right.toLowerCase() : right;
-  return a === b;
 }
 
 function readRequiredString(value: unknown, field: string): string {
@@ -1017,5 +894,3 @@ function readPermissionPolicy(value: unknown): 'deny' | 'allow_once' {
   if (value === 'deny' || value === 'allow_once') return value;
   throw new BridgeError('DSH_INVALID_ARGUMENT', 'permission_policy must be "deny" or "allow_once"');
 }
-
-export { JSON_SCHEMA_EMPTY };

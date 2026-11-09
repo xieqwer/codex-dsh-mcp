@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { SessionBridge } from '../src/session-tools.ts';
@@ -27,6 +27,7 @@ let logFile: string;
 let sessionsFile: string;
 let bridge: SessionBridge;
 let sessionId: string;
+let dshHome: string;
 
 function readLog(): LoggedFrame[] {
   if (!existsSync(logFile)) return [];
@@ -40,43 +41,30 @@ function received(method: string): LoggedFrame[] {
   return readLog().filter((entry) => entry.kind === 'recv' && entry.frame?.method === method);
 }
 
+/** Create the persisted directory a real DSH session/new would leave behind. */
+function seedSessionStorage(home: string, id: string): string {
+  const dir = join(home, 'sessions', '--D-Workspace-project--', id);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'events.jsonl'), '{"type":"start"}\n', 'utf8');
+  return dir;
+}
+
 before(() => {
   root = makeTempDir('mapping');
+  dshHome = join(root, 'dsh-home');
   logFile = join(root, 'acp-frames.jsonl');
   sessionsFile = join(root, 'sessions.json');
   process.env.FAKE_ACP_LOG_FILE = logFile;
   process.env.FAKE_ACP_SESSIONS_FILE = sessionsFile;
-  process.env.FAKE_ACP_PAGE_SIZE = '2';
   delete process.env.FAKE_ACP_MODE;
-  bridge = new SessionBridge(makeConfig({ allowedCwds: [root] }), silentLogger);
+  bridge = new SessionBridge(makeConfig({ allowedCwds: [root], dshHome }), silentLogger);
 });
 
 after(async () => {
   await bridge.shutdown();
   delete process.env.FAKE_ACP_LOG_FILE;
   delete process.env.FAKE_ACP_SESSIONS_FILE;
-  delete process.env.FAKE_ACP_PAGE_SIZE;
   removeDir(root);
-});
-
-test('session/list maps to ACP session/list with the validated cwd filter', async () => {
-  const outcome = await bridge.call('dsh_list_sessions', { cwd: root });
-  assert.equal(outcome.isError, undefined);
-  const result = parseToolText(outcome);
-  assert.equal(result.ok, true);
-  assert.equal(result.source, 'session/list');
-  assert.ok(Array.isArray(result.sessions));
-
-  await waitFor(() => received('session/list').length > 0, 5_000, 'session/list frame');
-  const frame = received('session/list').at(-1)!;
-  assert.equal(frame.frame?.params?.cwd, root);
-});
-
-test('dsh_list_sessions rejects a cwd outside the allowlist before touching ACP', async () => {
-  const outcome = await bridge.call('dsh_list_sessions', { cwd: 'C:\\Windows' });
-  assert.equal(outcome.isError, true);
-  const result = parseToolText(outcome);
-  assert.equal(result.error?.code, 'DSH_INVALID_CWD');
 });
 
 test('session/new carries the canonical cwd and returns a session id', async () => {
@@ -112,6 +100,7 @@ test('an allowlisted model id is mapped onto the agent-advertised composite valu
       allowedCwds: [root],
       allowedModels: ['fake-model'],
       allowedReasoningEfforts: ['high'],
+      dshHome,
     }),
     silentLogger,
   );
@@ -142,7 +131,7 @@ test('an allowlisted model id is mapped onto the agent-advertised composite valu
 
 test('an unknown model id is refused with the advertised choices', async () => {
   const scratch = new SessionBridge(
-    makeConfig({ allowedCwds: [root], allowedModels: ['not-a-model'] }),
+    makeConfig({ allowedCwds: [root], allowedModels: ['not-a-model'], dshHome }),
     silentLogger,
   );
   try {
@@ -183,7 +172,7 @@ test('a second prompt for the same session is rejected while one is in flight', 
   try {
     // Restart the ACP child so the new mode takes effect.
     await bridge.shutdown();
-    bridge = new SessionBridge(makeConfig({ allowedCwds: [root], promptTimeoutMs: 4_000 }), silentLogger);
+    bridge = new SessionBridge(makeConfig({ allowedCwds: [root], promptTimeoutMs: 4_000, dshHome }), silentLogger);
     const created = parseToolText(await bridge.call('dsh_create_session', { cwd: root }));
     const slowId = String(created.sessionId);
     const first = bridge.call('dsh_send_message', { session_id: slowId, text: 'slow' });
@@ -209,16 +198,18 @@ test('dsh_send_message requires an active session and an explicit id', async () 
   assert.equal(parseToolText(missing).error?.code, 'DSH_INVALID_ARGUMENT');
 });
 
-test('session/close releases the session and keeps it resumable', async () => {
-  const closed = await bridge.call('dsh_close_session', { session_id: sessionId, confirm: true });
+test('session/close releases the session and keeps persisted storage', async () => {
+  const created = parseToolText(await bridge.call('dsh_create_session', { cwd: root }));
+  const id = String(created.sessionId);
+  const closed = await bridge.call('dsh_close_session', { session_id: id, confirm: true });
   const result = parseToolText(closed);
   assert.equal(result.ok, true);
   assert.equal(result.closed, true);
-  assert.equal(result.persisted_history_retained, true);
+  assert.equal(result.persisted_storage_retained, true);
 
   await waitFor(() => received('session/close').length > 0, 5_000, 'session/close frame');
 
-  const afterClose = await bridge.call('dsh_send_message', { session_id: sessionId, text: 'x' });
+  const afterClose = await bridge.call('dsh_send_message', { session_id: id, text: 'x' });
   assert.equal(parseToolText(afterClose).error?.code, 'DSH_SESSION_UNKNOWN');
 });
 
@@ -230,64 +221,6 @@ test('session/close refuses to run without confirm=true', async () => {
   const result = parseToolText(outcome);
   assert.equal(result.error?.code, 'DSH_INVALID_ARGUMENT');
   assert.match(String(result.error?.message), /confirm=true/u);
-});
-
-test('session/resume validates ownership and canonical cwd, then continues the session', async () => {
-  const created = parseToolText(await bridge.call('dsh_create_session', { cwd: root }));
-  const resumableId = String(created.sessionId);
-  await bridge.call('dsh_close_session', { session_id: resumableId, confirm: true });
-
-  const resumed = await bridge.call('dsh_resume_session', {
-    session_id: resumableId,
-    cwd: root,
-    acknowledge_released: true,
-  });
-  const result = parseToolText(resumed);
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.sessionId, resumableId);
-  assert.match(String(result.note), /does not replay/u);
-
-  const continued = parseToolText(await bridge.call('dsh_send_message', { session_id: resumableId, text: 'after resume' }));
-  assert.equal(continued.assistant_text, 'echo: after resume');
-});
-
-test('session/resume reports an unknown session instead of guessing', async () => {
-  const outcome = await bridge.call('dsh_resume_session', {
-    session_id: 'missing-session',
-    cwd: root,
-    acknowledge_released: true,
-  });
-  assert.equal(outcome.isError, true);
-  assert.equal(parseToolText(outcome).error?.code, 'DSH_SESSION_NOT_RESUMABLE');
-});
-
-test('session/resume refuses to run without an explicit release acknowledgement', async () => {
-  const created = parseToolText(await bridge.call('dsh_create_session', { cwd: root }));
-  const id = String(created.sessionId);
-  await bridge.call('dsh_close_session', { session_id: id, confirm: true });
-  const outcome = await bridge.call('dsh_resume_session', { session_id: id, cwd: root });
-  assert.equal(outcome.isError, true);
-  const result = parseToolText(outcome);
-  assert.equal(result.error?.code, 'DSH_INVALID_ARGUMENT');
-  assert.match(String(result.error?.message), /not read-only/u);
-  assert.match(String(result.error?.message), /switching tabs does not release/u);
-});
-test('session/resume reports a cwd mismatch with both paths', async () => {
-  const other = join(root, 'other-cwd');
-  const { mkdirSync } = await import('node:fs');
-  mkdirSync(other, { recursive: true });
-  const created = parseToolText(await bridge.call('dsh_create_session', { cwd: root }));
-  const id = String(created.sessionId);
-  await bridge.call('dsh_close_session', { session_id: id, confirm: true });
-  const outcome = await bridge.call('dsh_resume_session', {
-    session_id: id,
-    cwd: other,
-    acknowledge_released: true,
-  });
-  assert.equal(outcome.isError, true);
-  const result = parseToolText(outcome);
-  assert.equal(result.error?.code, 'DSH_CWD_MISMATCH');
-  assert.match(String(result.error?.message), /canonical cwd is/u);
 });
 
 test('session/cancel targets exactly one session and reports whether a prompt is in flight', async () => {
@@ -309,7 +242,7 @@ test('permission requests are denied by default and allowed only when asked', as
   process.env.FAKE_ACP_MODE = 'permission-request';
   try {
     await bridge.shutdown();
-    bridge = new SessionBridge(makeConfig({ allowedCwds: [root] }), silentLogger);
+    bridge = new SessionBridge(makeConfig({ allowedCwds: [root], dshHome }), silentLogger);
     const created = parseToolText(await bridge.call('dsh_create_session', { cwd: root }));
     const id = String(created.sessionId);
 
@@ -327,7 +260,7 @@ test('permission requests are denied by default and allowed only when asked', as
 
 test('thoughts are returned only when the operator opts in', async () => {
   const scratch = new SessionBridge(
-    makeConfig({ allowedCwds: [root], includeThoughts: true }),
+    makeConfig({ allowedCwds: [root], includeThoughts: true, dshHome }),
     silentLogger,
   );
   try {
@@ -342,98 +275,9 @@ test('thoughts are returned only when the operator opts in', async () => {
   }
 });
 
-test('dsh_list_sessions treats limit as a strict returned-row cap', async () => {
-  const scratch = new SessionBridge(makeConfig({ allowedCwds: [root] }), silentLogger);
-  try {
-    for (let i = 0; i < 3; i += 1) {
-      await scratch.call('dsh_create_session', { cwd: root });
-    }
-    const result = parseToolText(await scratch.call('dsh_list_sessions', { cwd: root, limit: 1 }));
-    assert.equal(result.ok, true);
-    assert.equal(result.count, 1);
-    assert.equal((result.sessions as unknown[]).length, 1);
-    assert.equal(result.limitReached, true);
-    assert.equal(Number(result.skippedInPage) >= 1, true);
-  } finally {
-    await scratch.shutdown();
-  }
-});
-
-test('unfiltered list still hides sessions outside the cwd allowlist', async () => {
-  const outside = makeTempDir('outside');
-  const existing = existsSync(sessionsFile)
-    ? (JSON.parse(readFileSync(sessionsFile, 'utf8')) as Array<Record<string, unknown>>)
-    : [];
-  writeFileSync(
-    sessionsFile,
-    JSON.stringify([...existing, { sessionId: 'outside-session', cwd: outside }]),
-    'utf8',
-  );
-  const scratch = new SessionBridge(makeConfig({ allowedCwds: [root] }), silentLogger);
-  try {
-    const result = parseToolText(await scratch.call('dsh_list_sessions', { limit: 100 }));
-    const sessions = result.sessions as Array<Record<string, unknown>>;
-    assert.equal(sessions.some((entry) => entry.sessionId === 'outside-session'), false);
-    assert.equal(Number(result.filteredOut) >= 1, true);
-  } finally {
-    await scratch.shutdown();
-    const current = JSON.parse(readFileSync(sessionsFile, 'utf8')) as Array<Record<string, unknown>>;
-    writeFileSync(
-      sessionsFile,
-      JSON.stringify(current.filter((entry) => entry.sessionId !== 'outside-session')),
-      'utf8',
-    );
-    removeDir(outside);
-  }
-});
-
-test('permission_policy passed to resume is not inherited by later messages', async () => {
-  process.env.FAKE_ACP_MODE = 'permission-request';
-  const scratch = new SessionBridge(makeConfig({ allowedCwds: [root] }), silentLogger);
-  try {
-    const created = parseToolText(await scratch.call('dsh_create_session', { cwd: root }));
-    const id = String(created.sessionId);
-    await scratch.call('dsh_close_session', { session_id: id, confirm: true });
-    const resumed = parseToolText(await scratch.call('dsh_resume_session', {
-      session_id: id,
-      cwd: root,
-      acknowledge_released: true,
-      permission_policy: 'allow_once',
-    }));
-    assert.equal(resumed.ok, true, JSON.stringify(resumed));
-    const sent = parseToolText(await scratch.call('dsh_send_message', { session_id: id, text: 'run' }));
-    assert.match(String(sent.assistant_text), /reject-once/u);
-  } finally {
-    delete process.env.FAKE_ACP_MODE;
-    await scratch.shutdown();
-  }
-});
-
-test('a fresh ACP connection can resume a session that was active before a crash', async () => {
-  process.env.FAKE_ACP_MODE = 'crash-on-prompt';
-  const scratch = new SessionBridge(makeConfig({ allowedCwds: [root] }), silentLogger);
-  try {
-    const created = parseToolText(await scratch.call('dsh_create_session', { cwd: root }));
-    const id = String(created.sessionId);
-    const crashed = parseToolText(await scratch.call('dsh_send_message', { session_id: id, text: 'crash' }));
-    assert.equal(crashed.ok, false);
-    delete process.env.FAKE_ACP_MODE;
-    await sleep(3_200);
-    const resumed = parseToolText(await scratch.call('dsh_resume_session', {
-      session_id: id,
-      cwd: root,
-      acknowledge_released: true,
-    }));
-    assert.equal(resumed.ok, true, JSON.stringify(resumed));
-  } finally {
-    delete process.env.FAKE_ACP_MODE;
-    await scratch.shutdown();
-  }
-});
-
-test('a stale tool history after resume is reported with actionable guidance', async () => {
+test('a stale tool history after a DSH upgrade is reported with actionable guidance', async () => {
   process.env.FAKE_ACP_MODE = 'defer-error';
-  const scratch = new SessionBridge(makeConfig({ allowedCwds: [root] }), silentLogger);
+  const scratch = new SessionBridge(makeConfig({ allowedCwds: [root], dshHome }), silentLogger);
   try {
     const created = parseToolText(await scratch.call('dsh_create_session', { cwd: root }));
     const sent = parseToolText(
@@ -444,6 +288,92 @@ test('a stale tool history after resume is reported with actionable guidance', a
     assert.match(String(sent.error?.message), /create a NEW session/u);
   } finally {
     delete process.env.FAKE_ACP_MODE;
+    await scratch.shutdown();
+  }
+});
+
+test('dsh_delete_session removes the persisted directory of a session created here', async () => {
+  const scratch = new SessionBridge(makeConfig({ allowedCwds: [root], dshHome }), silentLogger);
+  try {
+    const created = parseToolText(await scratch.call('dsh_create_session', { cwd: root }));
+    const id = String(created.sessionId);
+    const dir = seedSessionStorage(dshHome, id);
+
+    const outcome = await scratch.call('dsh_delete_session', { session_id: id, confirm: true });
+    const result = parseToolText(outcome);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.deleted, true);
+    assert.equal(result.path, join('sessions', '--D-Workspace-project--', id));
+    assert.equal(existsSync(dir), false);
+
+    // An active session is closed before its storage is removed.
+    await waitFor(() => received('session/close').length > 0, 5_000, 'session/close before delete');
+    assert.equal(received('session/close').at(-1)!.frame?.params?.sessionId, id);
+  } finally {
+    await scratch.shutdown();
+  }
+});
+
+test('dsh_delete_session refuses to delete a session this process did not create', async () => {
+  const scratch = new SessionBridge(makeConfig({ allowedCwds: [root], dshHome }), silentLogger);
+  try {
+    const created = parseToolText(await scratch.call('dsh_create_session', { cwd: root }));
+    const other = String(created.sessionId);
+    await scratch.shutdown();
+    // A fresh bridge process starts with an empty created-set: it must refuse.
+    const second = new SessionBridge(makeConfig({ allowedCwds: [root], dshHome }), silentLogger);
+    try {
+      const outcome = await second.call('dsh_delete_session', { session_id: other, confirm: true });
+      assert.equal(outcome.isError, true);
+      assert.equal(parseToolText(outcome).error?.code, 'DSH_SESSION_NOT_DELETABLE');
+      assert.match(String(parseToolText(outcome).error?.message), /prune-sessions\.ts/u);
+    } finally {
+      await second.shutdown();
+    }
+  } finally {
+    await scratch.shutdown();
+  }
+});
+
+test('dsh_delete_session requires confirm=true', async () => {
+  const scratch = new SessionBridge(makeConfig({ allowedCwds: [root], dshHome }), silentLogger);
+  try {
+    const created = parseToolText(await scratch.call('dsh_create_session', { cwd: root }));
+    const outcome = await scratch.call('dsh_delete_session', { session_id: String(created.sessionId) });
+    assert.equal(outcome.isError, true);
+    const result = parseToolText(outcome);
+    assert.equal(result.error?.code, 'DSH_INVALID_ARGUMENT');
+    assert.match(String(result.error?.message), /confirm=true/u);
+  } finally {
+    await scratch.shutdown();
+  }
+});
+
+test('dsh_delete_session rejects ids that could escape the sessions root', async () => {
+  const scratch = new SessionBridge(makeConfig({ allowedCwds: [root], dshHome }), silentLogger);
+  try {
+    await scratch.call('dsh_create_session', { cwd: root });
+    for (const id of ['../evil', '..\\evil', 'C:\\Windows', 'a/b']) {
+      const outcome = await scratch.call('dsh_delete_session', { session_id: id, confirm: true });
+      assert.equal(outcome.isError, true, `id ${id} must be rejected`);
+      assert.equal(parseToolText(outcome).error?.code, 'DSH_INVALID_ARGUMENT');
+    }
+  } finally {
+    await scratch.shutdown();
+  }
+});
+
+test('dsh_delete_session reports missing storage instead of pretending success', async () => {
+  const scratch = new SessionBridge(makeConfig({ allowedCwds: [root], dshHome }), silentLogger);
+  try {
+    const created = parseToolText(await scratch.call('dsh_create_session', { cwd: root }));
+    const outcome = await scratch.call('dsh_delete_session', {
+      session_id: String(created.sessionId),
+      confirm: true,
+    });
+    assert.equal(outcome.isError, true);
+    assert.equal(parseToolText(outcome).error?.code, 'DSH_SESSION_STORAGE_NOT_FOUND');
+  } finally {
     await scratch.shutdown();
   }
 });

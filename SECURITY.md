@@ -30,15 +30,30 @@ when a persistent deny policy is required.
 - The MCP client (Codex) is trusted to pass an explicit `session_id`.
 - The bridge validates `cwd` against an allowlist with `realpath`, rejecting
   out-of-tree paths and symlink/junction escapes. This validates session working
-  directories, not DSH file access or command execution. A session list without
-  a `cwd` filter can return summaries outside the allowlist.
+  directories, not DSH file access or command execution.
 - MCP request cancellation is currently logged without cancelling ACP work.
   Use `dsh_cancel_session` explicitly; cancellation is cooperative. The output
   text limit does not bound tool output size or total memory use.
 - The bridge does **not** implement cross-process locking. DSH ACP cannot see
-  sessions held by another process (e.g. the desktop app), so resuming a
-  session that is still open elsewhere is unsupported; `dsh_resume_session`
-  requires `acknowledge_released=true` but that is caller-attested, not verified.
+  sessions held by another process (e.g. the desktop app). v0.2.0 removed list /
+  resume entirely, so the bridge never claims to take over or continue an
+  existing session.
+
+## Destructive operations (v0.2.0)
+
+`dsh_close_session` and `dsh_delete_session` require `confirm=true` and accept
+only sessions created by the current bridge process.
+
+`dsh_delete_session` is the single deliberate exception to "never touch DSH
+storage": ACP has no `session/delete`, so it removes
+`<DSH_HOME>/sessions/<group>/<id>`. It closes an active session first, validates
+the id against path traversal, refuses sessions it did not create, never reads
+or parses session content, and is irreversible.
+
+`scripts/prune-sessions.ts` is an operator-run batch cleanup: dry-run by
+default, deletes only unregistered bare-UUID directories, keeps `session-*`
+directories and every session registered in `workspace.json`, and never reads
+session content. It must not be exposed as an MCP tool or run unattended.
 
 ## Reporting
 
@@ -52,4 +67,5 @@ and a minimal reproduction.
 - Vulnerabilities in DeepSeek Harness itself (report them to the DSH project).
 - Issues that require reading or modifying DSH internal storage.
 - Feature gaps documented in README's *Known limitations* / *Non-goals*
-  (history replay, taking over a live desktop session, remote access).
+  (history replay, listing/resuming existing sessions, taking over a live
+  desktop session, remote access).

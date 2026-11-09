@@ -1,6 +1,6 @@
 {
   "name": "codex-dsh-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Local MCP stdio bridge that lets Codex drive DeepSeek Harness sessions over the DSH ACP profile",
   "license": "MIT",

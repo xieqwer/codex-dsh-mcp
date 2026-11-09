@@ -133,7 +133,7 @@ export class AcpClient {
     this.#output = options.output;
     this.#requestTimeoutMs = options.requestTimeoutMs;
     this.#clientName = options.clientName ?? 'codex-dsh-mcp';
-    this.#clientVersion = options.clientVersion ?? '0.1.0';
+    this.#clientVersion = options.clientVersion ?? '0.2.0';
     this.#onNotification = options.onNotification;
     this.#onRequest = options.onRequest;
     this.#onProtocolWarning = options.onProtocolWarning ?? (() => {});

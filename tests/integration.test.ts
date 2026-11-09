@@ -17,8 +17,8 @@ import {
  * End-to-end over real stdio processes:
  * test → bridge child (`node src/index.ts`) → fake DSH ACP child.
  *
- * The second bridge process proves that a persisted non-active session can be
- * listed and resumed after the first bridge process exited.
+ * v0.2.0 exposes no history access: a restarted bridge creates and drives a
+ * fresh session. It never lists or resumes the previous process's session.
  */
 
 const BRIDGE_ENTRY = join(PROJECT_ROOT, 'src', 'index.ts');
@@ -135,7 +135,7 @@ test('bridge process A creates a session and gets an assistant reply over ACP', 
 
     const listTools = await bridge.request('tools/list');
     const names = (listTools.result?.tools as Array<Record<string, unknown>>).map((tool) => tool.name);
-    assert.equal(names.length, 6);
+    assert.equal(names.length, 5);
 
     const created = await bridge.callTool('dsh_create_session', { cwd: root });
     assert.equal(created.body.ok, true);
@@ -156,40 +156,21 @@ test('bridge process A creates a session and gets an assistant reply over ACP', 
   assert.match(log, /mcp tools\/call dsh_create_session/u);
 });
 
-test('a new bridge process lists the persisted session and resumes it', async () => {
-  const sessionId = process.env.DSH_CODEX_TEST_SESSION;
-  assert.ok(sessionId, 'window A must have persisted the session id');
-
+test('a new bridge process can create and drive a fresh session after the first exits', async () => {
   const bridge = new BridgeProcess(bridgeEnv());
   try {
     await bridge.request('initialize', { protocolVersion: '2025-06-18', capabilities: {} });
     bridge.notify('notifications/initialized');
 
-    const listed = await bridge.callTool('dsh_list_sessions', { cwd: root });
-    assert.equal(
-      listed.isError,
-      undefined,
-      `list failed: ${JSON.stringify(listed.body)} | bridge log: ${existsSync(bridgeLog) ? readFileSync(bridgeLog, 'utf8').slice(-2000) : '(missing)'}`,
-    );
-    const sessions = listed.body.sessions as Array<Record<string, unknown>>;
-    assert.equal(Array.isArray(sessions), true, `list body without sessions: ${JSON.stringify(listed.body)}`);
-    assert.equal(
-      sessions.some((entry) => entry.sessionId === sessionId),
-      true,
-      `session ${sessionId} should be listed after the first bridge exited`,
-    );
+    const created = await bridge.callTool('dsh_create_session', { cwd: root });
+    assert.equal(created.body.ok, true, JSON.stringify(created.body));
+    const sessionId = String(created.body.sessionId);
+    assert.notEqual(sessionId, process.env.DSH_CODEX_TEST_SESSION, 'a restarted bridge must create a new session');
 
-    const resumed = await bridge.callTool('dsh_resume_session', {
-      session_id: sessionId,
-      cwd: root,
-      acknowledge_released: true,
-    });
-    assert.equal(resumed.body.ok, true, JSON.stringify(resumed.body));
-    assert.match(String(resumed.body.note), /does not replay/u);
+    const sent = await bridge.callTool('dsh_send_message', { session_id: sessionId, text: 'second window' });
+    assert.equal(sent.body.assistant_text, 'echo: second window');
 
-    const continued = await bridge.callTool('dsh_send_message', { session_id: sessionId, text: 'continue' });
-    assert.equal(continued.body.assistant_text, 'echo: continue');
-
+    // A dedicated process may close the session it owns; no history is replayed.
     const closed = await bridge.callTool('dsh_close_session', { session_id: sessionId, confirm: true });
     assert.equal(closed.body.closed, true);
   } finally {

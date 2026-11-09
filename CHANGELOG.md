@@ -4,6 +4,49 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-09
+
+### Changed
+
+- Removed `dsh_list_sessions` and `dsh_resume_session`. Resuming was an
+  unreliable substitute for history access (ACP does not replay transcripts,
+  sessions active elsewhere cannot be verified, and DSH's deferred tool loading
+  breaks some resumed conversations). The bridge now exposes only creation and
+  driving: `dsh_create_session`, `dsh_send_message`, `dsh_cancel_session`,
+  `dsh_close_session` and `dsh_delete_session`.
+- Tool catalog, instructions, README (zh/en), configuration docs and SECURITY
+  now state explicitly that there is no list/resume/history access.
+- `dsh_close_session` reports `persisted_storage_retained: true`; its description
+  no longer claims the session can be resumed later by this bridge.
+
+### Added
+
+- `dsh_delete_session`: deletes a session directory created by the current
+  bridge process (`confirm=true` required). ACP has no `session/delete`, so this
+  is the single deliberate local-storage exception: it closes an active session
+  first, never reads session content, and refuses sessions it did not create.
+- `scripts/prune-sessions.ts`: explicit, dry-run-by-default cleanup of
+  unregistered bare-UUID session directories (ACP-created sessions that the
+  desktop UI cannot see). It keeps `session-*` directories and everything
+  registered in `workspace.json`; `--yes` performs deletion.
+- Tests for the deletion path (ownership, confirm, path traversal, missing
+  storage) and a cross-process "restart creates and drives a fresh session" test.
+
+### Removed
+
+- `scripts/real-e2e-probe.ts`, `scripts/real-desktop-visibility.ts`,
+  `scripts/acceptance-desktop-sessions.ts` (all depended on list/resume).
+- List/resume tests and their fake-ACP pagination fixtures.
+
+### Known limitations
+
+- No history search or transcript replay; there is still no official DSH API.
+  "Deleting" a session removes its persisted directory locally and cannot be
+  undone; it is not an ACP operation and is only offered for sessions created by
+  the current bridge process.
+- `usage` is still `null` on DSH 0.2.1-rc.5, and the real-install baseline
+  remains Windows x64 + DSH 0.2.1-rc.5 + Node 24.
+
 ## [0.1.0] - 2026-11-03
 
 ### Added

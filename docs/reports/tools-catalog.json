@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-03T04:29:53.183Z",
+  "generatedAt": "2026-11-09T12:12:05.691Z",
   "method": "MCP initialize + notifications/initialized + tools/list",
   "initializeResponse": {
     "protocolVersion": "2025-06-18",
@@ -10,49 +10,16 @@
     },
     "serverInfo": {
       "name": "codex-dsh-mcp",
-      "version": "0.1.0"
+      "version": "0.2.0"
     },
-    "instructions": "This server controls DeepSeek Harness (DSH) sessions through the DSH ACP profile.\nTypical flow: dsh_list_sessions -> dsh_create_session or dsh_resume_session -> dsh_send_message -> dsh_close_session.\nAlways pass an explicit session_id; the bridge never assumes \"the most recent session\".\nA resumed session continues the persisted conversation but does NOT replay prior transcript content.\nDSH tool permission requests are denied unless permission_policy=\"allow_once\" is passed explicitly.\nDSH internal thoughts are not returned unless the bridge operator enabled DSH_CODEX_INCLUDE_THOUGHTS."
+    "instructions": "This server controls DeepSeek Harness (DSH) sessions through the DSH ACP profile.\nTypical flow: dsh_create_session -> dsh_send_message -> dsh_close_session (or dsh_delete_session to remove the persisted session).\nEvery conversation starts at dsh_create_session: the bridge does not list or resume existing sessions, and it never reads or replays prior transcripts.\nAlways pass an explicit session_id; the bridge never assumes \"the most recent session\".\nDSH tool permission requests are denied unless permission_policy=\"allow_once\" is passed explicitly.\nDSH internal thoughts are not returned unless the bridge operator enabled DSH_CODEX_INCLUDE_THOUGHTS."
   },
   "toolsListResponse": {
     "tools": [
       {
-        "name": "dsh_list_sessions",
-        "title": "List DSH sessions",
-        "description": "List persisted, resumable DSH root sessions from the ACP session/list method (newest first). Optional cwd filter must be an absolute path inside the allowed directories. Returns only sessionId/cwd/title/updatedAt summaries. WARNING: sessions held by the desktop app are also listed (ACP cannot see cross-process activity); visibility does not mean the session is free.",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "cwd": {
-              "type": "string",
-              "description": "Absolute working directory to filter by (realpath validated)."
-            },
-            "cursor": {
-              "type": "string",
-              "description": "Opaque cursor from a previous nextCursor field."
-            },
-            "limit": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100,
-              "default": 20,
-              "description": "Maximum summaries to return."
-            }
-          },
-          "required": [],
-          "additionalProperties": false
-        },
-        "annotations": {
-          "readOnlyHint": true,
-          "destructiveHint": false,
-          "idempotentHint": true,
-          "openWorldHint": false
-        }
-      },
-      {
         "name": "dsh_create_session",
         "title": "Create a DSH session",
-        "description": "Create a fresh persistent DSH session via ACP session/new. cwd must be absolute, inside the configured allowlist, and is realpath-canonicalised before use. model / reasoning_effort are only accepted when explicitly allowlisted by the bridge.",
+        "description": "Create a fresh persistent DSH session via ACP session/new. cwd must be absolute, inside the configured allowlist, and is realpath-canonicalised before use. model / reasoning_effort are only accepted when explicitly allowlisted by the bridge. Every conversation starts here: the bridge does not list or resume existing sessions.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -86,58 +53,15 @@
         }
       },
       {
-        "name": "dsh_resume_session",
-        "title": "Resume a DSH session",
-        "description": "Restore a persisted inactive DSH session via ACP session/resume, validating canonical cwd and session ownership first. Resume only restores a persisted inactive session and continues it; it does not replay prior transcript messages. WARNING: DSH ACP cannot see sessions held by another process (the desktop app), so session/list also lists sessions the desktop may still be running. Resuming is NOT read-only: it activates the session and writes to the same persisted log, which can conflict with the desktop. Requires acknowledge_released=true, and switching desktop tabs does not count as releasing.",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "session_id": {
-              "type": "string",
-              "description": "Explicit persisted session id."
-            },
-            "cwd": {
-              "type": "string",
-              "description": "Absolute working directory; must match the session canonical cwd."
-            },
-            "acknowledge_released": {
-              "type": "boolean",
-              "description": "Must be true. Confirms the session is not in use by the desktop app (closed there, not merely a background tab)."
-            },
-            "permission_policy": {
-              "type": "string",
-              "enum": [
-                "deny",
-                "allow_once"
-              ],
-              "default": "deny",
-              "description": "Default permission policy recorded for later prompts."
-            }
-          },
-          "required": [
-            "session_id",
-            "cwd",
-            "acknowledge_released"
-          ],
-          "additionalProperties": false
-        },
-        "annotations": {
-          "readOnlyHint": false,
-          "destructiveHint": false,
-          "idempotentHint": false,
-          "openWorldHint": false
-        }
-      },
-      {
         "name": "dsh_send_message",
         "title": "Send a message to a DSH session",
-        "description": "Send one user text message to an existing session via ACP session/prompt and wait for the turn to settle. Exactly one prompt may be in flight per session. Returns the assistant text, a tool-call summary and usage. DSH internal thoughts (agent_thought_chunk) are NOT returned unless the operator set DSH_CODEX_INCLUDE_THOUGHTS. Permission requests made by DSH tools are DENIED unless permission_policy is explicitly \"allow_once\"; they are never auto-approved.",
+        "description": "Send one user text message to a session created by this bridge process via ACP session/prompt and wait for the turn to settle. Exactly one prompt may be in flight per session. Returns the assistant text, a tool-call summary and usage. DSH internal thoughts (agent_thought_chunk) are NOT returned unless the operator set DSH_CODEX_INCLUDE_THOUGHTS. Permission requests made by DSH tools are DENIED unless permission_policy is explicitly \"allow_once\"; they are never auto-approved.",
         "inputSchema": {
           "type": "object",
           "properties": {
             "session_id": {
               "type": "string",
-              "description": "Explicit session id (never defaulted to \"most recent\")."
+              "description": "Explicit session id returned by dsh_create_session."
             },
             "text": {
               "type": "string",
@@ -198,7 +122,7 @@
       {
         "name": "dsh_close_session",
         "title": "Close a DSH session",
-        "description": "Close exactly one session via ACP session/close. This cancels in-flight work, drains updates, flushes persistence, and releases the session run scope. Persisted history is retained and can be resumed later. Requires confirm=true. Closing is NOT read-only and is NOT a safe way to inspect a session; it will cancel that session's in-flight work.",
+        "description": "Close exactly one session via ACP session/close. This cancels in-flight work, drains updates, flushes persistence, and releases the session run scope. Persisted storage is retained (the bridge offers no resume, so the session becomes dormant). Requires confirm=true. Closing is NOT read-only and is NOT a safe way to inspect a session; it will cancel that session's in-flight work.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -208,7 +132,36 @@
             },
             "confirm": {
               "type": "boolean",
-              "description": "Must be true: closing cancels in-flight work and releases run resources (history is kept; it is not read-only)."
+              "description": "Must be true: closing cancels in-flight work and releases run resources (it is not read-only)."
+            }
+          },
+          "required": [
+            "session_id",
+            "confirm"
+          ],
+          "additionalProperties": false
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": true,
+          "idempotentHint": false,
+          "openWorldHint": false
+        }
+      },
+      {
+        "name": "dsh_delete_session",
+        "title": "Delete a DSH session (local storage)",
+        "description": "Permanently delete the local persisted storage of a session CREATED BY THIS BRIDGE PROCESS. DSH ACP has no session/delete method, so this removes the session directory under DSH_HOME/sessions directly; it is the only way to remove one. A still-active session is closed first (requires sessionCapabilities.close). Requires confirm=true. Sessions created by the desktop app or by a previous bridge process are refused; run scripts/prune-sessions.ts for explicit manual cleanup.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "session_id": {
+              "type": "string",
+              "description": "Explicit session id created by this bridge process."
+            },
+            "confirm": {
+              "type": "boolean",
+              "description": "Must be true: deleting permanently removes the session's local persisted files (cannot be undone)."
             }
           },
           "required": [
@@ -226,5 +179,5 @@
       }
     ]
   },
-  "toolCount": 6
+  "toolCount": 5
 }

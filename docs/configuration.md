@@ -31,22 +31,24 @@
 ## 路径与权限
 
 - Windows 自动探测路径为 `%LOCALAPPDATA%\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd`。使用其他安装位置时显式设置启动器，避免误用 PATH 中的另一版本。
-- cwd 会先经 `realpath` 规范化；不存在的目录、相对路径、越界目录及指向允许范围外的链接会被拒绝。恢复时还要求 cwd 与会话原目录一致。
+- cwd 会先经 `realpath` 规范化；不存在的目录、相对路径、越界目录及指向允许范围外的链接会被拒绝。
 - 允许列表约束会话工作目录，不限制 DSH 的文件访问、命令执行或网络能力。子进程继承宿主环境；桥接没有额外执行沙箱。
-- `dsh_list_sessions` 的 `cwd` 是可选过滤条件。不传时返回项仍按允许列表过滤；`limit` 是严格返回上限，页内被截断时 `limitReached` / `skippedInPage` 会标明。
-- 运行中的桥接不直接读取 DSH 凭据或持久化正文，但 DSH 使用自身凭据和数据目录。部分勘察 / 验收脚本会读取本地存储的目录名或文件元数据。
+- v0.2.0 不提供 list / resume；`dsh_create_session` 只按允许列表创建新会话。
+- 运行中的桥接不直接读取 DSH 凭据或持久化正文。`dsh_delete_session` 与 `scripts/prune-sessions.ts` 会删除会话目录（不读正文），详见 README 的「删除与批量清理」。
 
 ## 权限策略与取消
 
 `dsh_send_message.permission_policy` 支持 `deny` 和 `allow_once`。`deny` 选择拒绝项，无拒绝项则取消权限请求；`allow_once` 为该 prompt 中每次权限请求选择单次允许项，不是整个 prompt 只允许一次操作。
 
-策略不跨消息继承：`permission_policy` 只作用于携带它的那次 `dsh_send_message`；`dsh_resume_session` 的同名参数仅做兼容性校验。需要允许时，在对应消息上显式传入。
+策略不跨消息继承：`permission_policy` 只作用于携带它的那次 `dsh_send_message`。需要允许时，在对应消息上显式传入。
+
+删除另需 `confirm=true`：`dsh_delete_session` 只接受当前桥接进程创建过的会话，会话仍在运行时先 `session/close` 再删目录；`scripts/prune-sessions.ts` 默认 dry-run，只清理未登记的裸 UUID 会话目录。
 
 prompt 超时会发送 `session/cancel` 并在本地停止等待。MCP 的 `notifications/cancelled` 会转发到对应会话的 `session/cancel`；ACP 取消是协作式通知，是否停止取决于 DSH 处理结果。
 
 ## 连接与输出
 
-MCP 和 ACP 分别握手。ACP 连接未完成时，工具目录暂列全部六个工具；协商成功后会按能力刷新，隐藏缺少 `resume` / `close` 的工具。
+MCP 和 ACP 分别握手。ACP 连接未完成时，工具目录暂列全部五个工具；协商成功后会按能力刷新，缺少 `close` 能力时隐藏 `dsh_close_session`。
 
 `initialize` 使用 `CONNECT_TIMEOUT_MS`；首次启动需要更长时间时同时检查 Codex 的 `startup_timeout_sec`。Codex 的 `tool_timeout_sec` 应覆盖预期工具调用时长。
 

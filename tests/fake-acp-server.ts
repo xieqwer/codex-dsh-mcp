@@ -40,6 +40,12 @@ if (args.includes('--help')) {
 log({ kind: 'start', args, mode });
 
 let nextSessionNumber = 1;
+// Continue numbering across process restarts so a new bridge process cannot
+// accidentally reuse a persisted session id.
+for (const persisted of readSessions()) {
+  const match = /^fake-session-(\d+)$/u.exec(persisted.sessionId);
+  if (match !== null) nextSessionNumber = Math.max(nextSessionNumber, Number(match[1]) + 1);
+}
 let nextRequestId = 1000;
 const pendingServerRequests = new Map<number, (result: unknown) => void>();
 const prompts = new Map<string, { cancelled: boolean; timer?: NodeJS.Timeout }>();

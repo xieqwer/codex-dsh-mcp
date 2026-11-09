@@ -14,13 +14,13 @@ const SUPPORTED_MCP_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'] as con
 const DEFAULT_MCP_VERSION = SUPPORTED_MCP_VERSIONS[0];
 
 const SERVER_NAME = 'codex-dsh-mcp';
-const SERVER_VERSION = '0.1.0';
+const SERVER_VERSION = '0.2.0';
 
 const INSTRUCTIONS = [
   'This server controls DeepSeek Harness (DSH) sessions through the DSH ACP profile.',
-  'Typical flow: dsh_list_sessions -> dsh_create_session or dsh_resume_session -> dsh_send_message -> dsh_close_session.',
+  'Typical flow: dsh_create_session -> dsh_send_message -> dsh_close_session (or dsh_delete_session to remove the persisted session).',
+  'Every conversation starts at dsh_create_session: the bridge does not list or resume existing sessions, and it never reads or replays prior transcripts.',
   'Always pass an explicit session_id; the bridge never assumes "the most recent session".',
-  'A resumed session continues the persisted conversation but does NOT replay prior transcript content.',
   'DSH tool permission requests are denied unless permission_policy="allow_once" is passed explicitly.',
   'DSH internal thoughts are not returned unless the bridge operator enabled DSH_CODEX_INCLUDE_THOUGHTS.',
 ].join('\n');

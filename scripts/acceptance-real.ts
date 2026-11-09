@@ -2,10 +2,10 @@
 /**
  * Final acceptance: real DSH_HOME, dedicated throw-away sessions, REAL model prompt.
  *
- * Phase 1 (new bridge process):
- *   create dedicated session -> send ONE minimal real prompt -> collect reply -> close.
- * Phase 2 (fresh bridge process, session now inactive):
- *   list -> resume (acknowledge_released=true) -> send ONE minimal prompt -> close.
+ * v0.2.0 exposes no history access. Phase 1 creates a session, sends ONE
+ * minimal real prompt and closes it. Phase 2 starts a fresh bridge process,
+ * verifies the closed session's persisted directory still exists, then creates
+ * and drives a NEW session (never list/resume).
  *
  * This spends a small amount of model tokens. It never touches the user's daily
  * sessions: both prompts go to sessions created by this script under
@@ -15,7 +15,7 @@
  * Evidence: docs/reports/acceptance-real.json
  */
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -30,7 +30,7 @@ if (!args.includes('--confirm-cost')) {
   console.error(
     [
       'acceptance-real: refusing to run without cost confirmation.',
-      'This sends TWO minimal real prompts (phase 1 create+reply, phase 2 resume+reply).',
+      'This sends TWO minimal real prompts (phase 1 create+reply, phase 2 fresh create+reply).',
       'Re-run with: node scripts/acceptance-real.ts --confirm-cost',
     ].join('\n'),
   );
@@ -192,35 +192,29 @@ async function phase2(): Promise<void> {
   const bridge = new Bridge('bridge-phase2.log');
   try {
     await initialize(bridge);
-    const listed = await bridge.callTool('dsh_list_sessions', { cwd: workspace });
-    record('phase2 dsh_list_sessions', {
-      ok: listed.ok,
-      count: listed.count,
-      sessions: listed.sessions,
-    });
-    const sessions = (listed.sessions as Array<Record<string, unknown>>) ?? [];
-    if (!sessions.some((entry) => entry.sessionId === sessionId)) {
-      throw new Error(`released test session ${sessionId} was not listed`);
-    }
 
-    const resumed = await bridge.callTool('dsh_resume_session', {
-      session_id: sessionId,
-      cwd: workspace,
-      acknowledge_released: true,
+    // The closed session must still be on disk; v0.2.0 never replays or resumes it.
+    const persisted = findPersistedSession(sessionId);
+    record('phase2 persisted session directory after close', {
+      sessionId,
+      exists: persisted !== undefined,
+      path: persisted,
     });
-    record('phase2 dsh_resume_session', resumed);
-    if (resumed.ok !== true) throw new Error(`resume failed: ${JSON.stringify(resumed)}`);
+    if (persisted === undefined) throw new Error(`persisted directory for ${sessionId} disappeared after close`);
+
+    const created = await bridge.callTool('dsh_create_session', { cwd: workspace });
+    record('phase2 dsh_create_session (fresh bridge process)', created);
+    if (created.ok !== true) throw new Error(`create failed: ${JSON.stringify(created)}`);
+    const newSessionId = String(created.sessionId);
+    if (newSessionId === sessionId) throw new Error('a fresh bridge process must create a new session id');
 
     const prompt = 'Reply with the single word: RESUMED';
     const started = Date.now();
-    const sent = await bridge.callTool('dsh_send_message', { session_id: sessionId, text: prompt });
-    record('phase2 dsh_send_message after resume (real model)', {
-      ...sent,
-      wall_ms: Date.now() - started,
-    });
-    if (sent.ok !== true) throw new Error(`prompt after resume failed: ${JSON.stringify(sent)}`);
+    const sent = await bridge.callTool('dsh_send_message', { session_id: newSessionId, text: prompt });
+    record('phase2 dsh_send_message (real model)', { ...sent, wall_ms: Date.now() - started });
+    if (sent.ok !== true) throw new Error(`prompt failed: ${JSON.stringify(sent)}`);
     evidence.phase2 = {
-      sessionId,
+      newSessionId,
       prompt,
       stop_reason: sent.stop_reason,
       assistant_text: sent.assistant_text,
@@ -228,12 +222,27 @@ async function phase2(): Promise<void> {
       wall_ms: sent.wall_ms,
     };
 
-    const closed = await bridge.callTool('dsh_close_session', { session_id: sessionId, confirm: true });
+    const closed = await bridge.callTool('dsh_close_session', { session_id: newSessionId, confirm: true });
     record('phase2 dsh_close_session', closed);
     evidence.ok = true;
   } finally {
     await bridge.close();
   }
+}
+
+/** Find `<DSH_HOME>/sessions/<group>/<id>` without reading any session content. */
+function findPersistedSession(id: string): string | undefined {
+  const sessionsRoot = join(DSH_HOME, 'sessions');
+  try {
+    for (const group of readdirSync(sessionsRoot, { withFileTypes: true })) {
+      if (!group.isDirectory()) continue;
+      const candidate = join(sessionsRoot, group.name, id);
+      if (existsSync(candidate)) return candidate;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 void (async () => {
